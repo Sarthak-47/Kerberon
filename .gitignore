@@ -4,6 +4,12 @@
 .gocache/
 .tmp/
 
+# Vendored dependencies are reproducible from go.mod + go.sum and are not
+# committed: modernc.org/sqlite ships transpiled C for every platform, so
+# vendor/ is ~133 MB and each dependency bump would add that again, permanently,
+# to git history. Regenerate on demand with `go mod vendor`. See DECISIONS D11.
+vendor/
+
 # Build output
 /dist/
 /kerberon

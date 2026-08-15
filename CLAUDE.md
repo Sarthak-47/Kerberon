@@ -31,9 +31,16 @@ GOCACHE     = <project>\.gocache
 ```
 
 - `scripts\env.ps1` sets these for a shell session. Run it before any `go` command.
-- Dependencies are vendored (`go mod vendor`) and `./vendor` is committed, so builds
-  are reproducible and work offline. Build with `-mod=vendor`.
-- `.gopath/`, `.gocache/`, and `.tmp/` are git-ignored.
+- Dependencies live in the project-local module cache, so a build downloads nothing
+  once populated and touches nothing outside the folder.
+- **`vendor/` is not committed.** `go.mod` + `go.sum` already pin every dependency by
+  cryptographic hash, which is what reproducibility actually requires. Vendoring
+  `modernc.org/sqlite` costs ~133 MB because it ships transpiled C for every platform,
+  and each dependency bump would add that again to git history permanently. Run
+  `go mod vendor` on demand if you need an offline build from a clean clone — but
+  delete it afterwards, since Go silently switches to `-mod=vendor` whenever the
+  directory exists, which makes local builds diverge from CI. See DECISIONS D11.
+- `.gopath/`, `.gocache/`, `.tmp/`, and `vendor/` are git-ignored.
 - Nothing is ever installed with `go install` to a global path.
 
 ### The one documented exception to R1

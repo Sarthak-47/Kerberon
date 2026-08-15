@@ -207,6 +207,37 @@ at the required iteration count.
 
 ---
 
+## D11. Dependencies are pinned by `go.sum`, not vendored into git
+
+**Accepted.** Amends CLAUDE.md R2 as originally written.
+
+R2 initially called for `go mod vendor` with `./vendor` committed, on the reasoning
+that vendoring is Go's closest equivalent to a Python virtualenv. Measured, that costs
+**133.5 MB across 2,000 files** — 125 MB of which is `modernc.org/sqlite` and its
+`libc`, shipped as transpiled C generated for *every* platform rather than the four
+Kerberon targets.
+
+That is permanent: git history never shrinks, and each future SQLite bump adds another
+~125 MB. A handful of dependency updates would put the repository near a gigabyte, for
+a project whose entire pitch is being small enough to run on a Raspberry Pi.
+
+The isolation R2 exists to guarantee is already achieved without it:
+
+- `GOMODCACHE` points inside the project, so dependencies are downloaded to and read
+  from the project folder and nowhere else.
+- `go.sum` pins every module by cryptographic hash. A tampered or substituted
+  dependency fails the build. This is what reproducibility actually requires;
+  vendoring adds only the ability to build from a clean clone with no network.
+
+`vendor/` is therefore git-ignored and **also deleted locally after generation**: Go
+switches to `-mod=vendor` automatically whenever the directory is present, so leaving
+it would make local builds silently diverge from CI, which has no vendor directory.
+
+Regenerate with `go mod vendor` when an offline build is genuinely needed, then remove
+it again.
+
+---
+
 ## Open, carried from spec §15
 
 Not decided here; raise with the author before the affected work begins.
