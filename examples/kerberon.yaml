@@ -1,0 +1,150 @@
+# Kerberon example configuration.
+#
+# This file is configuration, not state. It belongs in your git repository so
+# that on-call changes are reviewable in a pull request. Incidents, timers,
+# notifications and schedule overrides live in SQLite and are never written
+# here.
+#
+# Validate it before it matters:
+#
+#     kerberon validate --config kerberon.yaml
+#
+# Run that in CI and a bad on-call config fails a PR instead of failing at 3am.
+
+server:
+  listen: "0.0.0.0:8080"
+  # Required. Ack links are built from this, so it must be an address the
+  # person being paged can actually open from their phone.
+  external_url: "https://kerberon.example.com"
+  # Signs ack tokens. Generate with: openssl rand -hex 32
+  secret_key: "${KERBERON_SECRET}"
+  # Authenticates the alert ingest endpoints.
+  ingest_token: "${KERBERON_INGEST_TOKEN}"
+
+database:
+  path: "./kerberon.db"
+
+users:
+  - id: sarthak
+    name: "Sarthak"
+    # An IANA zone name. A fixed offset like +05:30 is rejected: it cannot
+    # express daylight saving, so a rotation built on it drifts twice a year.
+    timezone: "Asia/Kolkata"
+    contacts:
+      ntfy: "https://ntfy.sh/kerberon-sarthak-a8f3"
+      telegram: "123456789"
+      email: "sarthak@example.com"
+
+  - id: priya
+    name: "Priya"
+    timezone: "Asia/Kolkata"
+    contacts:
+      ntfy: "https://ntfy.sh/kerberon-priya-b21c"
+      telegram: "987654321"
+      email: "priya@example.com"
+
+teams:
+  - name: platform
+    members: [sarthak, priya]
+
+schedules:
+  - name: platform-primary
+    team: platform
+    timezone: "Asia/Kolkata"
+    layers:
+      - name: base-weekly
+        type: rotation
+        participants: [sarthak, priya]
+        rotation: weekly
+        handoff:
+          day: monday
+          time: "09:00"
+
+  - name: platform-secondary
+    team: platform
+    timezone: "Asia/Kolkata"
+    layers:
+      - name: base-weekly-offset
+        type: rotation
+        # Offset by one, so the secondary is never the same person as the
+        # primary.
+        participants: [priya, sarthak]
+        rotation: weekly
+        handoff:
+          day: monday
+          time: "09:00"
+
+escalation_policies:
+  - name: critical-24x7
+    # Loop the whole policy twice before the incident expires.
+    repeat: 2
+    # Resume escalation if an acknowledged incident is not resolved within
+    # this window. This catches "acknowledged and fell back asleep".
+    ack_timeout: 30m
+    steps:
+      - delay: 0
+        targets: [schedule:platform-primary]
+        channels: [ntfy, telegram]
+      - delay: 5m
+        targets: [schedule:platform-primary]
+        channels: [ntfy, telegram]
+      - delay: 5m
+        targets: [schedule:platform-secondary]
+        channels: [ntfy, telegram]
+      - delay: 10m
+        # Everyone.
+        targets: [team:platform]
+        channels: [ntfy, telegram, email]
+
+  - name: business-hours
+    repeat: 1
+    steps:
+      - delay: 0
+        targets: [schedule:platform-primary]
+        channels: [ntfy]
+      - delay: 15m
+        targets: [team:platform]
+        channels: [ntfy, email]
+
+routes:
+  - match:
+      severity: critical
+    team: platform
+    policy: critical-24x7
+    group_by: [alertname, cluster, service]
+    # Wait this long after the first alert of a new group before paging, so a
+    # cascade arrives and the notification says "12 services down" rather than
+    # paging twelve times.
+    group_wait: 30s
+    # Minimum gap before a new notification for an already-open incident.
+    group_interval: 5m
+    # All alerts must stay resolved this long before the incident closes.
+    # This is what stops a flapping alert producing a page-resolve-page storm.
+    resolve_grace: 2m
+    # Excluded from the fingerprint. Including a pod name means a rescheduled
+    # pod looks like a brand new alert.
+    volatile_labels: [pod, instance_id, trace_id]
+
+  - match:
+      severity: warning
+    team: platform
+    policy: business-hours
+    group_by: [alertname, service]
+    group_wait: 2m
+
+channels:
+  ntfy:
+    default_server: "https://ntfy.sh"
+  telegram:
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+  email:
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    from: "kerberon@example.com"
+    username: "${SMTP_USER}"
+    password: "${SMTP_PASS}"
+
+notifications:
+  # Used when every channel configured for a user has failed.
+  fallback_channel: email
+  max_attempts: 5

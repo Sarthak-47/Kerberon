@@ -11,24 +11,28 @@ is written.
 
 ## Phase 0 — Prerequisites
 
-Not in the spec's eight weeks. Must be settled before any Go code is written.
+Not in the spec's eight weeks. Settled before any Go code was written.
+**Status: complete.**
 
 | Item | State |
 |---|---|
-| Go 1.23+ toolchain installed | **Blocked** — not present on the machine |
-| Project-local `GOPATH`/`GOMODCACHE`/`GOCACHE` (`scripts\env.ps1`) | Pending Go |
-| Module path decided (depends on name — spec §15.1) | **Open question** |
-| `git init`, per-repo identity `Sarthak-47 <0906sarthak@gmail.com>` | Pending |
-| `.gitignore` covering `.gopath/`, `.gocache/`, `.tmp/`, `*.db*` | Pending |
-| CI workflows written into `.github/workflows/` | Pending |
-| `LICENSE` (Apache-2.0), `CONTRIBUTING.md` (DCO), `SECURITY.md` | Pending |
+| Go toolchain | Done — 1.26.6 pinned in `.toolchain/`, SHA256 verified against go.dev |
+| Project-local `GOPATH`/`GOMODCACHE`/`GOCACHE`/`GOTMPDIR`/`GOENV` | Done — `scripts\env.ps1`, `scripts\env.sh` |
+| Module path | Done — `github.com/Sarthak-47/kerberon` |
+| `git init`, per-repo identity, authorized remote | Done — `Sarthak-47 <0906sarthak@gmail.com>` |
+| `.gitignore` covering caches, toolchain, `vendor/`, `*.db*` | Done |
+| CI workflows | Done — build ×4, race tests, vet, gofmt, clock lint, DCO |
+| `LICENSE` (Apache-2.0), `CONTRIBUTING.md` (DCO), `SECURITY.md` | Done |
 
-**Exit:** `.\scripts\env.ps1; go version` works, module builds, `git log` shows the
-correct author with no co-author trailer.
+**Exit — met:** `. .\scripts\env.ps1; go version` works, all four targets build,
+`git log` shows the correct author with no co-author trailer, CI green on every push.
+
+Go's toolchain telemetry turned out to be the one write that cannot be redirected into
+the project; it is disabled machine-wide and documented in CLAUDE.md.
 
 ---
 
-## Phase 1 — Skeleton
+## Phase 1 — Skeleton — **complete**
 
 **Goal:** the spine everything else hangs from.
 
@@ -45,12 +49,18 @@ correct author with no co-author trailer.
 - Structured logging (`log/slog`).
 - CI: build ×4 platforms, `go vet`, race tests, the time-lint grep, DCO check.
 
-**Exit criteria**
-- `kerberon validate --config examples/kerberon.yaml` passes on a good config and
-  fails with a precise, line-referenced message on each of a set of broken ones.
-- `kerberon migrate` creates the schema; re-running is a no-op.
+**Exit criteria — all met**
+- `kerberon validate --config examples/kerberon.yaml` passes, and a deliberately
+  broken config reports all nine problems at once with line numbers and field paths.
+- `kerberon migrate` creates the schema; re-running reports the existing version and
+  changes nothing.
 - `FakeClock` unit tests pass with zero `time.Sleep` anywhere in the test suite.
-- CI green on all four target platforms.
+- CI green on all four target platforms. Binary is 7.2 MB against a 25 MB budget.
+
+Not done here, and deliberately: 24×7 coverage-gap detection is listed under spec §9
+as part of `validate`, but it needs the schedule resolver. It lands in Phase 4, and
+`validate` says so in its output rather than letting a reader assume it already proves
+someone is on call at every instant.
 
 **Unblocks:** everything.
 
