@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.6"
+
+jobs:
+  test:
+    name: Test (race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Verify no CGO is required
+        run: |
+          echo "CGO_ENABLED=0" >> "$GITHUB_ENV"
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt
+        run: |
+          # Scope to module packages so vendor/ and .toolchain/ are not walked.
+          unformatted="$(gofmt -l $(go list -f '{{.Dir}}' ./...))"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Test with race detector
+        # The race detector needs cgo, so it is the one place CGO_ENABLED=1 is
+        # allowed. Release builds below are strictly CGO_ENABLED=0.
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 ./...
+
+  clock-lint:
+    name: Clock discipline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No direct time access outside internal/clock
+        # DECISIONS.md D5. Superseded by an AST-based test once Phase 1 lands;
+        # this grep is the stopgap until then.
+        run: |
+          set +e
+          hits=$(grep -rnE '\btime\.(Now|Sleep|After|AfterFunc|Tick|NewTimer|NewTicker)\b' \
+                   --include='*.go' \
+                   --exclude-dir='internal/clock' \
+                   --exclude-dir='vendor' \
+                   --exclude-dir='.toolchain' \
+                   . )
+          set -e
+          if [ -n "$hits" ]; then
+            echo "Direct time access is only permitted in internal/clock:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK: no direct time access outside internal/clock"
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build static binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags="-s -w" -o /tmp/kerberon ./cmd/kerberon
+      - name: Report binary size
+        run: |
+          size=$(stat -c%s /tmp/kerberon)
+          mb=$(awk "BEGIN {printf \"%.1f\", $size/1048576}")
+          echo "${{ matrix.goos }}/${{ matrix.goarch }}: ${mb} MB"
+          # Spec §11 target is < 25 MB.
+          if [ "$size" -gt 26214400 ]; then
+            echo "::warning::binary exceeds the 25 MB target (${mb} MB)"
+          fi
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          fail=0
+          while read -r sha; do
+            [ -z "$sha" ] && continue
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            if ! git show -s --format='%B' "$sha" | grep -qiF "Signed-off-by: $author"; then
+              echo "missing or mismatched sign-off: $sha  $author"
+              fail=1
+            fi
+          done < <(git rev-list "$base..$head")
+          if [ "$fail" -ne 0 ]; then
+            echo "Fix with: git rebase --signoff ${base}"
+            exit 1
+          fi
+          echo "OK: all commits signed off"

@@ -1,0 +1,21 @@
+# Normalize to LF in the repository. Development happens on Windows but the
+# binary targets Linux first, and a shell script committed with CRLF fails on
+# Linux with a bad-interpreter error.
+* text=auto eol=lf
+
+# PowerShell is checked out CRLF locally; it is Windows-only anyway.
+*.ps1 text eol=crlf
+
+# Must be LF regardless of platform.
+*.sh      text eol=lf
+*.go      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sql     text eol=lf
+Makefile  text eol=lf
+
+# Never touched.
+*.png binary
+*.gif binary
+*.zip binary
+*.db  binary

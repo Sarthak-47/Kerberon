@@ -1,0 +1,30 @@
+# Project-local Go environment (CLAUDE.md R2) — never committed.
+.toolchain/
+.gopath/
+.gocache/
+.tmp/
+
+# Build output
+/dist/
+/kerberon
+/kerberon.exe
+/kerberon-bench
+/kerberon-bench.exe
+
+# Runtime state — SQLite database and its WAL/shm sidecars
+*.db
+*.db-wal
+*.db-shm
+
+# Local config that may hold real credentials.
+# examples/ is committed; a top-level kerberon.yaml is the operator's own.
+/kerberon.yaml
+*.local.yaml
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
