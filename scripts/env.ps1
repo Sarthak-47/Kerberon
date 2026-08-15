@@ -40,15 +40,26 @@ $env:GOCACHE    = "$Root\.gocache"
 $env:GOTMPDIR = "$Root\.tmp"
 $env:GOENV    = "$Root\.gopath\env"
 
-# No telemetry, per spec §13. Also keeps Go from writing to the user config dir.
-$env:GOTELEMETRY    = 'off'
-$env:GOTELEMETRYDIR = "$Root\.gopath\telemetry"
-
 # Never fetch a different toolchain version than the pinned one.
 $env:GOTOOLCHAIN = 'local'
 
-foreach ($d in @($env:GOPATH, $env:GOMODCACHE, $env:GOBIN, $env:GOCACHE, $env:GOTMPDIR, $env:GOTELEMETRYDIR)) {
+foreach ($d in @($env:GOPATH, $env:GOMODCACHE, $env:GOBIN, $env:GOCACHE, $env:GOTMPDIR)) {
     New-Item -ItemType Directory -Force -Path $d | Out-Null
+}
+
+# --- Telemetry -------------------------------------------------------------
+# GOTELEMETRY and GOTELEMETRYDIR are NON-SETTABLE: `go env` reports them but
+# setting them as environment variables does nothing. The only control is
+# `go telemetry off`, and the mode file lives under os.UserConfigDir()
+# (%AppData%\go on Windows), which is outside the project folder.
+#
+# In 'local' mode the toolchain writes counter files there on every build,
+# breaching R1. Warn loudly rather than failing silently.
+$telemetryMode = (& go telemetry) 2>$null
+if ($telemetryMode -and $telemetryMode.Trim() -ne 'off') {
+    Write-Warning "Go telemetry is '$($telemetryMode.Trim())' - the toolchain writes counter files to"
+    Write-Warning "  $(& go env GOTELEMETRYDIR)"
+    Write-Warning "which is outside the project folder (CLAUDE.md R1). Disable it with:  go telemetry off"
 }
 
 Write-Host "Kerberon env ready" -ForegroundColor Green

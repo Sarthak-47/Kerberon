@@ -31,12 +31,20 @@ export GOBIN="$ROOT/.gopath/bin"
 export GOCACHE="$ROOT/.gocache"
 export GOTMPDIR="$ROOT/.tmp"
 export GOENV="$ROOT/.gopath/env"
-export GOTELEMETRY="off"
-export GOTELEMETRYDIR="$ROOT/.gopath/telemetry"
 export GOTOOLCHAIN="local"
 export PATH="$GOBIN:$PATH"
 
-mkdir -p "$GOPATH" "$GOMODCACHE" "$GOBIN" "$GOCACHE" "$GOTMPDIR" "$GOTELEMETRYDIR"
+mkdir -p "$GOPATH" "$GOMODCACHE" "$GOBIN" "$GOCACHE" "$GOTMPDIR"
+
+# GOTELEMETRY and GOTELEMETRYDIR are non-settable; exporting them does nothing.
+# The only control is `go telemetry off`, and the data lives under
+# os.UserConfigDir(), outside the project folder. Warn rather than fail silently.
+mode="$(go telemetry 2>/dev/null || true)"
+if [ -n "$mode" ] && [ "$mode" != "off" ]; then
+    echo "warning: Go telemetry is '$mode'; the toolchain writes counter files to" >&2
+    echo "  $(go env GOTELEMETRYDIR)" >&2
+    echo "which is outside the project folder (CLAUDE.md R1). Disable with: go telemetry off" >&2
+fi
 
 echo "Kerberon env ready"
 echo "  go       $(go version)"

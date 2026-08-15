@@ -36,6 +36,27 @@ GOCACHE     = <project>\.gocache
 - `.gopath/`, `.gocache/`, and `.tmp/` are git-ignored.
 - Nothing is ever installed with `go install` to a global path.
 
+### The one documented exception to R1
+
+Go's toolchain telemetry cannot be redirected. `GOTELEMETRY` and `GOTELEMETRYDIR`
+are **non-settable** — `go env` reports them, but exporting them has no effect. The
+data path is derived from `os.UserConfigDir()`, which is `%AppData%\go` on Windows.
+
+In the default `local` mode the toolchain writes counter files there on every build.
+Telemetry is therefore set to `off` machine-wide:
+
+```
+go telemetry off
+```
+
+That leaves a single 14-byte mode file at `%AppData%\go\telemetry\mode` — the setting
+that keeps it off — plus ~16 KB of counter files written before it was disabled. No
+further writes occur. `scripts\env.ps1` and `scripts\env.sh` warn on session start if
+the mode is ever anything other than `off`, so a regression is caught immediately
+rather than leaking silently.
+
+This also satisfies the spec's "no telemetry, ever" position (§13).
+
 ## R3. Git identity and attribution
 
 All commits and pushes use **exactly** this identity:
