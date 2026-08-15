@@ -50,6 +50,12 @@ go test ./...
 If `.toolchain/` is absent, the env script will tell you; see `docs/ROADMAP.md`
 Phase 0.
 
+**`go test -race` needs a C compiler.** The race detector is the one place CGO is
+required, and Windows has no C toolchain by default, so `-race` fails locally there
+with a `runtime/cgo` build error. Run the plain suite on Windows; Linux CI runs every
+test under `-race` on each push. The same applies to the chaos suite, which is
+Linux-only for a different reason — Windows has no faithful `SIGKILL`.
+
 ## House rules for code
 
 These are enforced by CI and are not negotiable — they exist because the project's

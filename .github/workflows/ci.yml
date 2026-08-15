@@ -50,13 +50,14 @@ jobs:
         # DECISIONS.md D5. Superseded by an AST-based test once Phase 1 lands;
         # this grep is the stopgap until then.
         run: |
+          # --exclude-dir matches directory NAMES, not paths, so internal/clock
+          # must be filtered by path afterwards.
           set +e
           hits=$(grep -rnE '\btime\.(Now|Sleep|After|AfterFunc|Tick|NewTimer|NewTicker)\b' \
-                   --include='*.go' \
-                   --exclude-dir='internal/clock' \
-                   --exclude-dir='vendor' \
-                   --exclude-dir='.toolchain' \
-                   . )
+                   --include='*.go' . \
+                 | grep -v '^\./internal/clock/' \
+                 | grep -v '^\./vendor/' \
+                 | grep -v '^\./\.toolchain/')
           set -e
           if [ -n "$hits" ]; then
             echo "Direct time access is only permitted in internal/clock:"

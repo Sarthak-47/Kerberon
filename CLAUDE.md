@@ -85,6 +85,20 @@ co-author trailer.
 Do not create GitHub repositories, do not push to a remote that was not explicitly
 given, and do not add remotes speculatively. Wait for the owner to supply the repo URL.
 
+**Authorized remote** (provided by the owner, 2026-08-15):
+
+```
+origin  https://github.com/Sarthak-47/Kerberon.git
+```
+
+Commit and push as work progresses. No other remote may be added.
+
+Note: the repository is `Kerberon` but the Go module path is
+`github.com/Sarthak-47/kerberon`, lowercase per Go convention. GitHub resolves
+repository names case-insensitively so `go get` works, and the all-lowercase path
+avoids the case-sensitivity problems that bit `Sirupsen/logrus`. If the repository is
+ever renamed to lowercase, no code change is needed.
+
 ## R5. CI/CD
 
 A CI pipeline is required (see `docs/ROADMAP.md`, Phase 0). Workflow files are written
