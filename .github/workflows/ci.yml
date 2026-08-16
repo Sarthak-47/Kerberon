@@ -49,25 +49,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
       - name: No direct time access outside internal/clock
-        # DECISIONS.md D5. Superseded by an AST-based test once Phase 1 lands;
-        # this grep is the stopgap until then.
-        run: |
-          # --exclude-dir matches directory NAMES, not paths, so internal/clock
-          # must be filtered by path afterwards.
-          set +e
-          hits=$(grep -rnE '\btime\.(Now|Sleep|After|AfterFunc|Tick|NewTimer|NewTicker)\b' \
-                   --include='*.go' . \
-                 | grep -v '^\./internal/clock/' \
-                 | grep -v '^\./vendor/' \
-                 | grep -v '^\./\.toolchain/')
-          set -e
-          if [ -n "$hits" ]; then
-            echo "Direct time access is only permitted in internal/clock:"
-            echo "$hits"
-            exit 1
-          fi
-          echo "OK: no direct time access outside internal/clock"
+        # DECISIONS.md D5, enforced by parsing rather than grepping. A grep
+        # cannot tell code from prose (it flagged a doc comment mentioning
+        # time.AfterFunc) and cannot support a reviewed exemption.
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/lint/ -run Clock -count=1 -v
 
   chaos:
     name: Chaos (durable timers)

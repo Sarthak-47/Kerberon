@@ -66,6 +66,22 @@ correctness claims depend on them.
 a `Clock`. This is what makes the escalation engine and schedule resolver testable, and
 a violation silently makes tests nondeterministic rather than failing loudly.
 
+The rule is enforced by parsing, in `internal/lint`, so it runs on every platform via
+`go test ./...` and cannot be fooled by prose in a comment or by an import alias.
+
+Genuine exceptions exist and must be marked and justified:
+
+```go
+//kerberon:allow-clock -- real deadline so a hung test fails instead of blocking CI
+case <-time.After(5 * time.Second):
+```
+
+A whole file may be exempted with `//kerberon:allow-clock-file` in its doc comment.
+The only file using that today is the chaos harness, because a fake clock cannot span
+a real process restart — the worker is `SIGKILL`ed and the replacement process has no
+in-memory clock to advance. If you reach for either marker, say why on the same line;
+"the test was hard to write" is not a reason.
+
 **No `time.Sleep` in tests.** Use `FakeClock.Advance`. A test that sleeps is a test
 that will flake in CI.
 

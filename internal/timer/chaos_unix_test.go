@@ -15,6 +15,12 @@
 // exercise the same failure mode. See docs/DECISIONS.md D10. Delays are
 // milliseconds rather than minutes, which is why escalation delays must be
 // configurable rather than hardcoded.
+//
+// This harness is exempt from the clock rule because a fake clock cannot span
+// a real process restart: the worker is SIGKILLed and a new process starts with
+// no in-memory state to advance. Measuring real elapsed time is the point.
+//
+//kerberon:allow-clock-file
 package timer_test
 
 import (

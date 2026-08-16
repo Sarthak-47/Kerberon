@@ -105,6 +105,7 @@ func (h *harness) stop() {
 	h.cancel()
 	select {
 	case <-h.done:
+	//kerberon:allow-clock -- real deadline so a hung test fails instead of blocking CI
 	case <-time.After(5 * time.Second):
 		h.t.Error("scheduler did not stop within 5s")
 	}
@@ -167,6 +168,7 @@ func (f *fired) await(t *testing.T, what string) int64 {
 	select {
 	case id := <-f.signal:
 		return id
+	//kerberon:allow-clock -- real deadline so a hung test fails instead of blocking CI
 	case <-time.After(5 * time.Second):
 		t.Fatalf("%s: handler never ran", what)
 		return 0
@@ -288,6 +290,7 @@ func TestOverdueTimersRunInFireAtOrder(t *testing.T) {
 
 	select {
 	case <-done:
+	//kerberon:allow-clock -- real deadline so a hung test fails instead of blocking CI
 	case <-time.After(5 * time.Second):
 		t.Fatal("not all overdue timers fired")
 	}
@@ -442,7 +445,9 @@ func TestFailedHandlerRollsBackItsEffectAndLeavesTimerPending(t *testing.T) {
 	h.clk.Advance(time.Minute)
 
 	// Wait for at least one attempt.
+	//kerberon:allow-clock -- real wall-clock guard against an infinite retry loop
 	deadline := time.Now().Add(5 * time.Second)
+	//kerberon:allow-clock
 	for attempts.Load() == 0 && time.Now().Before(deadline) {
 		h.waitIdle()
 		h.clk.Advance(time.Second)
@@ -502,6 +507,7 @@ func TestHandlerCanScheduleTheNextTimerInTheSameTransaction(t *testing.T) {
 
 	select {
 	case <-done:
+	//kerberon:allow-clock -- real deadline so a hung test fails instead of blocking CI
 	case <-time.After(5 * time.Second):
 		t.Fatalf("escalation chain stalled after %d steps", steps.Load())
 	}
