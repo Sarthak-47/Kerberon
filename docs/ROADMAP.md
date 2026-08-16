@@ -66,7 +66,7 @@ someone is on call at every instant.
 
 ---
 
-## Phase 2 — Durable timers *(moved ahead of ingest, D9)*
+## Phase 2 — Durable timers *(moved ahead of ingest, D9)* — **complete**
 
 **Goal:** the exactly-once guarantee, proven early.
 
@@ -82,11 +82,22 @@ someone is on call at every instant.
   them to milliseconds (D10).
 - First chaos test — a handful of iterations, not yet 1,000.
 
-**Exit criteria**
-- Schedule a timer, `kill -9` the process, restart, timer fires **exactly once**.
-- Cancellation races are covered: cancel-during-fire never double-executes.
-- A process down for ten simulated minutes catches up on restart in `fire_at` order.
-- Chaos harness runs on Linux (WSL/Docker) — documented as not runnable on Windows.
+**Exit criteria — all met**
+- Schedule a timer, `SIGKILL` the process, restart, every escalation step fires
+  **exactly once** — asserted by counting one audit row per step across randomised
+  kill/restart cycles. Runs in CI on every push (15 iterations) and nightly (400).
+- Cancellation is re-checked inside the executing transaction, so an acknowledgement
+  landing as a step fires can never double-execute.
+- A process down past several deadlines catches up on restart in `fire_at` order,
+  with no separate recovery code path — the ordinary "earliest pending" query is
+  recovery.
+- A failed handler rolls back its effect and leaves the timer pending, which is
+  exactly what a crash mid-effect looks like.
+- Chaos harness is Unix-only and skipped on Windows, as planned.
+
+One design correction found by the tests: taking only the single earliest pending
+timer let a timer that was backing off after a handler failure block every timer
+behind it. The scheduler now considers a small batch instead.
 
 **Unblocks:** grouping (`group_wait`), escalation, heartbeats.
 

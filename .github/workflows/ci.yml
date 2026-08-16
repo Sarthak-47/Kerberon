@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Nightly, for the long chaos sweep.
+    - cron: "0 3 * * *"
 
 permissions:
   contents: read
@@ -65,6 +68,25 @@ jobs:
             exit 1
           fi
           echo "OK: no direct time access outside internal/clock"
+
+  chaos:
+    name: Chaos (durable timers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Every escalation step fires exactly once across kill/restart
+        # SIGKILLs the process at randomised points during an escalation,
+        # restarts it, and asserts each step left exactly one audit row.
+        # Zero means a missed page; twice means waking someone for nothing.
+        # Unix-only, see DECISIONS.md D10. The nightly run sweeps far more
+        # iterations than a per-push run can afford.
+        env:
+          CGO_ENABLED: "0"
+          KERBERON_CHAOS_ITERATIONS: ${{ github.event_name == 'schedule' && '400' || '15' }}
+        run: go test ./internal/timer/ -run Chaos -count=1 -v -timeout 45m
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
