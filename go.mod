@@ -3,6 +3,7 @@ module github.com/Sarthak-47/kerberon
 go 1.26.6
 
 require (
+	github.com/go-chi/chi/v5 v5.3.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0
 )

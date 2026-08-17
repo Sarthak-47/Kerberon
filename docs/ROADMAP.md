@@ -103,7 +103,7 @@ behind it. The scheduler now considers a small batch instead.
 
 ---
 
-## Phase 3 — Ingest, dedup, grouping
+## Phase 3 — Ingest, dedup, grouping — **complete**
 
 **Goal:** many alerts become few incidents.
 
@@ -118,11 +118,21 @@ behind it. The scheduler now considers a small batch instead.
 - Write path behind an interface so a batcher can drop in later; **no batcher yet**
   (D3).
 
-**Exit criteria**
-- POST a recorded alert storm; incidents form and collapse per golden-file expectations.
-- A group re-firing inside `resolve_grace` cancels the resolve and does not re-page.
-- Fixture payloads from real Alertmanager and Grafana instances parse correctly.
-- Concurrent alerts for one new group produce exactly one incident.
+**Exit criteria — met**
+- A 400-alert cascade produces one incident, 399 recorded duplicates and one page.
+  Verified both as a unit test and end to end against a running `kerberon serve`,
+  which answered in 85 ms with
+  `{"accepted":400,"incidents_created":1,"deduplicated":399,"unrouted":0}`.
+- A group re-firing inside `resolve_grace` cancels the pending resolve and does not
+  re-page; a test oscillates an alert five times and asserts one page total.
+- Alertmanager and Grafana payloads normalize, including Alertmanager's zero `endsAt`.
+- Unrouted alerts are counted and logged rather than dropped.
+- Ingest authenticates in constant time and caps body size.
+
+Deferred from this phase on purpose: the `/heartbeat/{token}` endpoint moves to
+Phase 6, where the sweeper that gives it meaning is built. Concurrent-insert races on
+a new group are covered at the store layer by the partial unique index; an ingest-level
+concurrency test belongs with the load harness in Phase 7.
 
 ---
 

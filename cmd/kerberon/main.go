@@ -4,20 +4,31 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"syscall"
+	"time"
 
 	// The timezone database is compiled into the binary. Without this,
 	// rotations break on minimal container images and on Windows, which ship
 	// no tzdata. Spec section 7.2.
 	_ "time/tzdata"
 
+	"github.com/Sarthak-47/kerberon/internal/clock"
 	"github.com/Sarthak-47/kerberon/internal/config"
+	"github.com/Sarthak-47/kerberon/internal/core"
+	"github.com/Sarthak-47/kerberon/internal/group"
+	"github.com/Sarthak-47/kerberon/internal/ingest"
+	"github.com/Sarthak-47/kerberon/internal/route"
 	"github.com/Sarthak-47/kerberon/internal/store"
+	"github.com/Sarthak-47/kerberon/internal/timer"
 )
 
 // Set via -ldflags at release time.
@@ -42,7 +53,9 @@ Run "kerberon <command> -h" for the flags a command accepts.
 `
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM is what a container runtime or systemd sends; without it the
+	// process is killed outright and an in-flight timer tick is lost.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := run(ctx, os.Args[1:]); err != nil {
@@ -80,8 +93,7 @@ func run(ctx context.Context, args []string) error {
 		return cmdMigrate(ctx, args[1:])
 
 	case "serve":
-		// Phase 5. See docs/ROADMAP.md.
-		return errors.New("serve: not implemented yet")
+		return cmdServe(ctx, args[1:])
 
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
@@ -178,6 +190,134 @@ Flags:
 	for _, m := range applied {
 		fmt.Printf("  applied %04d_%s\n", m.Version, m.Name)
 	}
+	return nil
+}
+
+func cmdServe(ctx context.Context, args []string) error {
+	fs, path := configFlags("serve")
+	logFormat := fs.String("log-format", "text", "log output format: text or json")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage: kerberon serve [flags]
+
+Runs the server: the ingest API, the durable timer scheduler, and the grouping
+engine. Migrations are applied at startup.
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var handler slog.Handler
+	switch *logFormat {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, nil)
+	case "text":
+		handler = slog.NewTextHandler(os.Stderr, nil)
+	default:
+		return fmt.Errorf("unknown log format %q; want text or json", *logFormat)
+	}
+	log := slog.New(handler)
+
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+
+	db, err := store.Open(ctx, cfg.Database.Path, store.Options{})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	applied, err := db.Migrate(ctx)
+	if err != nil {
+		return err
+	}
+	if len(applied) > 0 {
+		log.Info("applied migrations", "count", len(applied))
+	}
+
+	clk := clock.Real()
+	sched := timer.New(db, clk, timer.Options{Logger: log})
+	router := route.New(cfg)
+
+	// Phase 5 replaces this with the escalation engine. Until then a due page
+	// is recorded on the incident timeline so the behaviour is observable, and
+	// it is logged at warn level so nobody mistakes this for a working pager.
+	onPageDue := func(ctx context.Context, tx *sql.Tx, inc core.Incident) error {
+		log.Warn("incident is due to page, but notification delivery is not implemented yet",
+			"incident_id", inc.ID, "team", inc.Team, "policy", inc.Policy,
+			"title", inc.Title, "alert_count", inc.AlertCount)
+		return store.InsertEvent(ctx, tx, inc.ID, core.EventNotified,
+			`{"note":"delivery not implemented until Phase 5"}`, clk.Now())
+	}
+
+	engine := group.New(db, clk, router, sched, group.Options{
+		OnPageDue: onPageDue,
+		Logger:    log,
+	})
+
+	ingestSrv, err := ingest.New(engine, clk, ingest.Options{
+		Token:  cfg.Server.IngestToken,
+		Logger: log,
+	})
+	if err != nil {
+		return err
+	}
+
+	httpSrv := &http.Server{
+		Addr:              cfg.Server.Listen,
+		Handler:           ingestSrv.Routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// The scheduler and the HTTP server run until ctx is cancelled.
+	runCtx, stopRun := context.WithCancel(ctx)
+	defer stopRun()
+
+	schedDone := make(chan struct{})
+	go func() {
+		defer close(schedDone)
+		if err := sched.Run(runCtx); err != nil {
+			log.Error("timer scheduler stopped with an error", "error", err)
+		}
+	}()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Info("kerberon listening", "addr", cfg.Server.Listen, "database", db.Path())
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+		serveErr <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Info("shutting down")
+	case err := <-serveErr:
+		stopRun()
+		<-schedDone
+		if err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
+		return nil
+	}
+
+	// Stop accepting new work, then let the scheduler finish the tick it is on.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Error("http shutdown was not clean", "error", err)
+	}
+	stopRun()
+	<-schedDone
+
+	log.Info("stopped")
 	return nil
 }
 
