@@ -122,6 +122,12 @@ type Step struct {
 }
 
 type Route struct {
+	// Name is optional but recommended. It is part of the group key, so a
+	// route with an explicit name keeps its open incidents across edits to
+	// its match criteria. Left blank, a stable name is derived from the match
+	// criteria, team and policy — which means editing any of those starts new
+	// incidents rather than reusing the old group.
+	Name   string            `yaml:"name"`
 	Match  map[string]string `yaml:"match"`
 	Team   string            `yaml:"team"`
 	Policy string            `yaml:"policy"`

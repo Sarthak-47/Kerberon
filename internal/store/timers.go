@@ -165,9 +165,25 @@ func CancelTimer(ctx context.Context, q Queryer, id int64, at time.Time) error {
 // restricted to certain kinds. This is what an acknowledgement or a resolution
 // does to pending escalation timers. It returns how many were cancelled.
 func CancelIncidentTimers(ctx context.Context, q Queryer, incidentID int64, at time.Time, kinds ...core.TimerKind) (int64, error) {
+	return CancelIncidentTimersExcept(ctx, q, incidentID, 0, at, kinds...)
+}
+
+// CancelIncidentTimersExcept is CancelIncidentTimers with one timer spared.
+//
+// A timer handler that cancels its own timer would leave the scheduler unable
+// to mark it complete, so the whole transaction — including the effect — rolls
+// back and the timer fires again forever. A resolution handler in particular
+// wants to cancel everything pending for the incident, and must pass its own
+// timer id here to exclude itself.
+func CancelIncidentTimersExcept(ctx context.Context, q Queryer, incidentID, exceptID int64, at time.Time, kinds ...core.TimerKind) (int64, error) {
 	query := `UPDATE timers SET cancelled_at = ?
 		WHERE incident_id = ? AND completed_at IS NULL AND cancelled_at IS NULL`
 	args := []any{toUnix(at), incidentID}
+
+	if exceptID != 0 {
+		query += ` AND id <> ?`
+		args = append(args, exceptID)
+	}
 
 	if len(kinds) > 0 {
 		query += ` AND kind IN (`

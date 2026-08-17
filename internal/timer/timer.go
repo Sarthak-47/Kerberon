@@ -261,6 +261,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
+// errSelfCancelled marks a handler that cancelled or completed the very timer
+// it was executing. That rolls back the effect and leaves the timer pending, so
+// without naming it the scheduler would retry the same doomed work forever.
+var errSelfCancelled = errors.New("timer handler cancelled its own timer")
+
 // batchSize is how many upcoming timers step considers. A timer backing off
 // after a failure must not block the ones behind it, so the scheduler looks at
 // a small window rather than only the single earliest row.
@@ -330,7 +335,17 @@ func (s *Scheduler) execute(ctx context.Context, t core.Timer) error {
 		if err := handler.HandleTimer(ctx, tx, fresh); err != nil {
 			return fmt.Errorf("timer %d (%s): %w", fresh.ID, fresh.Kind, err)
 		}
-		return store.CompleteTimer(ctx, tx, fresh.ID, s.clk.Now())
+		if err := store.CompleteTimer(ctx, tx, fresh.ID, s.clk.Now()); err != nil {
+			if errors.Is(err, store.ErrTimerNotPending) {
+				// The handler cancelled or completed its own timer. The
+				// transaction is about to roll back, taking the effect with
+				// it, and the timer will still be pending — so this would
+				// otherwise repeat forever. Name it precisely.
+				return fmt.Errorf("%w: timer %d (%s)", errSelfCancelled, fresh.ID, fresh.Kind)
+			}
+			return err
+		}
+		return nil
 	})
 
 	switch {
@@ -338,6 +353,15 @@ func (s *Scheduler) execute(ctx context.Context, t core.Timer) error {
 		s.clearDefer(t.ID)
 		s.log.Debug("timer fired", "timer_id", t.ID, "kind", t.Kind,
 			"incident_id", t.IncidentID)
+		return nil
+
+	case errors.Is(err, errSelfCancelled):
+		// A handler bug, not a runtime condition. Retrying cannot help, so say
+		// so plainly rather than logging the same failure every second.
+		s.log.Error("timer handler cancelled its own timer, so its effect was rolled back; "+
+			"exclude the executing timer when cancelling an incident's timers",
+			"timer_id", t.ID, "kind", t.Kind, "incident_id", t.IncidentID)
+		s.defer_(t.ID)
 		return nil
 
 	case errors.Is(err, store.ErrTimerNotPending):

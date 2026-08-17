@@ -539,6 +539,46 @@ func TestUnknownKindIsDeferredNotCompleted(t *testing.T) {
 	}
 }
 
+// A handler that cancels its own timer rolls back its own effect and leaves the
+// timer pending, so the scheduler would retry the identical doomed work
+// forever. This looks like a hang rather than a failure, which is why it gets
+// its own test: the loop must terminate and the other timers must keep running.
+func TestHandlerCancellingItsOwnTimerDoesNotSpinForever(t *testing.T) {
+	h := newHarness(t)
+
+	var attempts atomic.Int64
+	h.sched.Register(core.TimerResolveTimeout, timer.HandlerFunc(
+		func(ctx context.Context, tx *sql.Tx, tm core.Timer) error {
+			attempts.Add(1)
+			// The mistake: cancel every timer for the incident, including the
+			// one currently executing.
+			_, err := store.CancelIncidentTimers(ctx, tx, tm.IncidentID, h.clk.Now())
+			return err
+		}))
+
+	good := newFired()
+	h.sched.Register(core.TimerGroupWait, good.handler())
+
+	h.schedule(core.TimerResolveTimeout, time.Minute)
+	h.schedule(core.TimerGroupWait, 2*time.Minute)
+
+	h.start()
+	h.waitIdle()
+	h.clk.Advance(3 * time.Minute)
+
+	// The unrelated timer must still fire; the self-cancelling one must not
+	// monopolise the loop.
+	good.await(t, "group_wait behind a self-cancelling timer")
+
+	if got := attempts.Load(); got == 0 {
+		t.Fatal("the self-cancelling handler never ran")
+	}
+	// It is deferred with backoff rather than retried tightly.
+	if got := attempts.Load(); got > 20 {
+		t.Errorf("self-cancelling handler ran %d times; it should back off, not spin", got)
+	}
+}
+
 // One failing timer must not prevent others from running.
 func TestOneFailingTimerDoesNotBlockOthers(t *testing.T) {
 	h := newHarness(t)
