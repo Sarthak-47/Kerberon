@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Sarthak-47/kerberon/internal/core"
 	"github.com/Sarthak-47/kerberon/internal/store"
 )
 
@@ -475,6 +477,159 @@ func TestReadersSeeCommittedWritesImmediately(t *testing.T) {
 		if n != 1 {
 			t.Errorf("reader did not see committed write for %q", key)
 		}
+	}
+}
+
+// ─── Overrides ────────────────────────────────────────────────────────────
+
+func mustParse(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parse %q: %v", s, err)
+	}
+	return v
+}
+
+func TestOverrideRoundTrip(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+
+	want := core.Override{
+		ScheduleName: "platform-primary",
+		UserID:       "arun",
+		StartsAt:     mustParse(t, "2026-08-20T12:00:00Z"),
+		EndsAt:       mustParse(t, "2026-08-21T03:30:00Z"),
+		Reason:       "covering for priya",
+		CreatedAt:    mustParse(t, "2026-08-18T09:00:00Z"),
+		CreatedBy:    "sarthak",
+	}
+
+	var id int64
+	err := db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = store.InsertOverride(ctx, tx, want)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := db.OverridesInWindow(ctx, "platform-primary",
+		mustParse(t, "2026-08-20T00:00:00Z"), mustParse(t, "2026-08-22T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d overrides, want 1", len(got))
+	}
+	o := got[0]
+	if o.ID != id || o.UserID != want.UserID || o.Reason != want.Reason || o.CreatedBy != want.CreatedBy {
+		t.Errorf("round trip lost data: %+v", o)
+	}
+	if !o.StartsAt.Equal(want.StartsAt) || !o.EndsAt.Equal(want.EndsAt) {
+		t.Errorf("times = %s..%s, want %s..%s", o.StartsAt, o.EndsAt, want.StartsAt, want.EndsAt)
+	}
+}
+
+// The window query must overlap, not contain: an override spanning the whole
+// window still applies within it.
+func TestOverridesInWindowMatchesOverlaps(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+
+	insert := func(from, to string) {
+		t.Helper()
+		err := db.Tx(ctx, func(tx *sql.Tx) error {
+			_, err := store.InsertOverride(ctx, tx, core.Override{
+				ScheduleName: "s", UserID: "arun",
+				StartsAt:  mustParse(t, from),
+				EndsAt:    mustParse(t, to),
+				CreatedAt: mustParse(t, "2026-08-01T00:00:00Z"),
+				CreatedBy: "sarthak",
+			})
+			return err
+		})
+		if err != nil {
+			t.Fatalf("insert %s..%s: %v", from, to, err)
+		}
+	}
+
+	insert("2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z") // spans the window
+	insert("2026-08-10T00:00:00Z", "2026-08-11T00:00:00Z") // inside
+	insert("2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z") // entirely before
+
+	got, err := db.OverridesInWindow(ctx, "s",
+		mustParse(t, "2026-08-09T00:00:00Z"), mustParse(t, "2026-08-12T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d overrides, want 2 (the spanning one and the contained one)", len(got))
+	}
+}
+
+func TestInsertOverrideRejectsAnInvertedWindow(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+
+	err := db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := store.InsertOverride(ctx, tx, core.Override{
+			ScheduleName: "s", UserID: "arun",
+			StartsAt:  mustParse(t, "2026-08-21T00:00:00Z"),
+			EndsAt:    mustParse(t, "2026-08-20T00:00:00Z"),
+			CreatedAt: mustParse(t, "2026-08-01T00:00:00Z"),
+			CreatedBy: "sarthak",
+		})
+		return err
+	})
+	if err == nil {
+		t.Fatal("an override ending before it starts should be rejected")
+	}
+}
+
+func TestDeleteOverride(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+
+	var id int64
+	err := db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = store.InsertOverride(ctx, tx, core.Override{
+			ScheduleName: "s", UserID: "arun",
+			StartsAt:  mustParse(t, "2026-08-20T00:00:00Z"),
+			EndsAt:    mustParse(t, "2026-08-21T00:00:00Z"),
+			CreatedAt: mustParse(t, "2026-08-01T00:00:00Z"),
+			CreatedBy: "sarthak",
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	var removed bool
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		removed, err = store.DeleteOverride(ctx, tx, id)
+		return err
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !removed {
+		t.Error("delete reported no row removed")
+	}
+
+	// Deleting again distinguishes "gone" from "never existed".
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		removed, err = store.DeleteOverride(ctx, tx, id)
+		return err
+	}); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+	if removed {
+		t.Error("deleting a missing override reported a removal")
 	}
 }
 

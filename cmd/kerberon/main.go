@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/Sarthak-47/kerberon/internal/group"
 	"github.com/Sarthak-47/kerberon/internal/ingest"
 	"github.com/Sarthak-47/kerberon/internal/route"
+	"github.com/Sarthak-47/kerberon/internal/schedule"
 	"github.com/Sarthak-47/kerberon/internal/store"
 	"github.com/Sarthak-47/kerberon/internal/timer"
 )
@@ -47,6 +49,7 @@ Commands:
   serve       Run the server
   validate    Check a config file and report every problem found
   migrate     Create or upgrade the database schema
+  oncall      Print who is on call
   version     Print version information
 
 Run "kerberon <command> -h" for the flags a command accepts.
@@ -92,6 +95,9 @@ func run(ctx context.Context, args []string) error {
 	case "migrate":
 		return cmdMigrate(ctx, args[1:])
 
+	case "oncall":
+		return cmdOncall(ctx, args[1:])
+
 	case "serve":
 		return cmdServe(ctx, args[1:])
 
@@ -128,15 +134,148 @@ Flags:
 		return err
 	}
 
+	// A schedule that leaves a hole means an incident nobody is paged for, so
+	// this fails the command rather than warning.
+	gaps, err := schedule.CheckCoverage(cfg, clock.Real().Now(), schedule.CoverageWindow)
+	if err != nil {
+		return err
+	}
+	if len(gaps) > 0 {
+		fmt.Fprintf(os.Stderr, "%s: %d coverage gap(s) in the next %d days\n",
+			*path, len(gaps), int(schedule.CoverageWindow.Hours()/24))
+		for i, g := range gaps {
+			if i == 10 {
+				fmt.Fprintf(os.Stderr, "  ... and %d more\n", len(gaps)-10)
+				break
+			}
+			fmt.Fprintf(os.Stderr, "  %s\n", g)
+		}
+		return errors.New("schedules do not provide continuous coverage")
+	}
+
 	fmt.Printf("%s is valid\n", *path)
 	fmt.Printf("  %d user(s), %d team(s), %d schedule(s), %d polic(ies), %d route(s)\n",
 		len(cfg.Users), len(cfg.Teams), len(cfg.Schedules),
 		len(cfg.EscalationPolicies), len(cfg.Routes))
 	fmt.Printf("  database: %s\n", cfg.Database.Path)
-	// Coverage-gap detection needs the schedule resolver and lands in Phase 4.
-	// Saying so is better than letting a reader assume this command already
-	// proves someone is on call at every instant.
-	fmt.Println("  note: 24x7 coverage checking arrives with the schedule resolver (Phase 4)")
+	fmt.Printf("  coverage: no gaps in the next %d days\n",
+		int(schedule.CoverageWindow.Hours()/24))
+	return nil
+}
+
+func cmdOncall(ctx context.Context, args []string) error {
+	fs, path := configFlags("oncall")
+	scheduleName := fs.String("schedule", "", "schedule to resolve (default: all)")
+	atFlag := fs.String("at", "", "RFC3339 instant to resolve (default: now)")
+	days := fs.Int("days", 0, "instead of one instant, print the rota for this many days")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage: kerberon oncall [flags]
+
+Prints who is on call. Useful on its own and for other tooling.
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+
+	at := clock.Real().Now()
+	if *atFlag != "" {
+		at, err = time.Parse(time.RFC3339, *atFlag)
+		if err != nil {
+			return fmt.Errorf("invalid --at %q: want RFC3339, e.g. 2026-08-17T09:00:00Z", *atFlag)
+		}
+	}
+
+	schedules, err := schedule.FromConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Overrides live in the database, so they are only applied when one is
+	// available. Reporting without them would be quietly wrong on the exact
+	// day somebody arranged a swap, so their absence is stated rather than
+	// glossed over.
+	//
+	// This is a read-only command: it neither creates the database nor
+	// migrates it, since doing either as a side effect of asking a question
+	// would be surprising.
+	var db *store.DB
+	if _, statErr := os.Stat(cfg.Database.Path); statErr != nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: %s does not exist, so overrides are not applied\n", cfg.Database.Path)
+	} else if d, err := store.Open(ctx, cfg.Database.Path, store.Options{}); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: could not open %s, so overrides are not applied: %v\n", cfg.Database.Path, err)
+	} else {
+		defer d.Close()
+		if v, err := d.SchemaVersion(ctx); err != nil || v == 0 {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s has no schema yet (run kerberon migrate), so overrides are not applied\n",
+				cfg.Database.Path)
+		} else {
+			db = d
+		}
+	}
+
+	names := make([]string, 0, len(schedules))
+	for name := range schedules {
+		if *scheduleName == "" || name == *scheduleName {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no schedule named %q", *scheduleName)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		s := schedules[name]
+
+		from, to := at, at.Add(time.Duration(*days)*24*time.Hour)
+		if *days <= 0 {
+			to = at.Add(time.Nanosecond)
+		}
+
+		var overrides []core.Override
+		if db != nil {
+			overrides, err = db.OverridesInWindow(ctx, name, from, to)
+			if err != nil {
+				return err
+			}
+		}
+		r := schedule.NewResolver(s, overrides)
+
+		if *days <= 0 {
+			user, ok := r.At(at)
+			if !ok {
+				fmt.Printf("%-24s NOBODY IS ON CALL at %s\n", name, at.Format(time.RFC3339))
+				continue
+			}
+			fmt.Printf("%-24s %s\n", name, user)
+			continue
+		}
+
+		fmt.Printf("%s (%s)\n", name, s.Location)
+		for _, iv := range r.Intervals(from, to) {
+			fmt.Printf("  %s  ->  %s  %s\n",
+				iv.Start.In(s.Location).Format("2006-01-02 15:04 MST"),
+				iv.End.In(s.Location).Format("2006-01-02 15:04 MST"),
+				iv.UserID)
+		}
+		for _, g := range r.Gaps(from, to) {
+			fmt.Printf("  %s  ->  %s  *** NOBODY ON CALL ***\n",
+				g.Start.In(s.Location).Format("2006-01-02 15:04 MST"),
+				g.End.In(s.Location).Format("2006-01-02 15:04 MST"))
+		}
+	}
 	return nil
 }
 
