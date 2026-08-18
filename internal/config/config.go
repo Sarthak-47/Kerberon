@@ -30,6 +30,7 @@ type Config struct {
 	Schedules          []Schedule         `yaml:"schedules"`
 	EscalationPolicies []EscalationPolicy `yaml:"escalation_policies"`
 	Routes             []Route            `yaml:"routes"`
+	Heartbeats         []Heartbeat        `yaml:"heartbeats"`
 	Channels           Channels           `yaml:"channels"`
 	Notifications      Notifications      `yaml:"notifications"`
 }
@@ -166,6 +167,21 @@ type Route struct {
 	// means a rescheduled pod looks like a new alert, which is the most common
 	// cause of duplicate paging in Kubernetes.
 	VolatileLabels []string `yaml:"volatile_labels"`
+}
+
+// Heartbeat is a dead-man's switch declared in configuration.
+//
+// The token is not configured: it is generated once and shown in the log, so a
+// secret that lets someone keep a dead job looking alive never has to live in
+// a git repository.
+type Heartbeat struct {
+	Name string `yaml:"name"`
+	// ExpectedInterval is how often a ping should arrive.
+	ExpectedInterval Duration `yaml:"expected_interval"`
+	// GracePeriod is how much lateness is tolerated before an incident.
+	GracePeriod Duration `yaml:"grace_period"`
+	Team        string   `yaml:"team"`
+	Severity    string   `yaml:"severity"`
 }
 
 type Channels struct {

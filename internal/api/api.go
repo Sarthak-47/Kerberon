@@ -44,9 +44,10 @@ type Server struct {
 	// signer, acker and incidents are optional: a server built without them
 	// still serves ingest and on-call, and the acknowledgement endpoints say
 	// so plainly rather than failing obscurely.
-	signer    *ack.Signer
-	acker     Acknowledger
-	incidents IncidentStore
+	signer     *ack.Signer
+	acker      Acknowledger
+	incidents  IncidentStore
+	heartbeats HeartbeatRecorder
 }
 
 // Options configures a Server.
@@ -58,6 +59,7 @@ type Options struct {
 	Signer       *ack.Signer
 	Acknowledger Acknowledger
 	Incidents    IncidentStore
+	Heartbeats   HeartbeatRecorder
 	Logger       *slog.Logger
 }
 
@@ -68,14 +70,15 @@ func New(ing *ingest.Server, schedules map[string]*schedule.Schedule, clk clock.
 		log = slog.Default()
 	}
 	return &Server{
-		ingest:    ing,
-		schedules: schedules,
-		overrides: opts.Overrides,
-		clk:       clk,
-		log:       log,
-		signer:    opts.Signer,
-		acker:     opts.Acknowledger,
-		incidents: opts.Incidents,
+		ingest:     ing,
+		schedules:  schedules,
+		overrides:  opts.Overrides,
+		clk:        clk,
+		log:        log,
+		signer:     opts.Signer,
+		acker:      opts.Acknowledger,
+		incidents:  opts.Incidents,
+		heartbeats: opts.Heartbeats,
 	}
 }
 
@@ -107,6 +110,12 @@ func (s *Server) Routes() http.Handler {
 	// token is the authentication, and requiring a login here is exactly how
 	// incidents go unacknowledged at 3am. Both methods are accepted because
 	// some mail clients prefetch with GET.
+	// The heartbeat ping carries its own token, so it sits outside the
+	// bearer-authenticated tree: the thing calling it is usually a one-line
+	// curl in a crontab that cannot set a header.
+	r.Get("/api/v1/heartbeat/{token}", s.handleHeartbeatPing)
+	r.Post("/api/v1/heartbeat/{token}", s.handleHeartbeatPing)
+
 	r.Get("/ack/{incident}/{user}/{token}", s.handleAckLink)
 	r.Post("/ack/{incident}/{user}/{token}", s.handleAckLink)
 

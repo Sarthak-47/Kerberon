@@ -12,6 +12,8 @@ import (
 	// The timezone database is compiled in. Without it, rotations break on
 	// minimal container images and on Windows (spec section 7.2).
 	_ "time/tzdata"
+
+	"github.com/Sarthak-47/kerberon/internal/core"
 )
 
 // Error is a single validation problem.
@@ -138,6 +140,7 @@ func (c *Config) Validate(root *yaml.Node, path string) error {
 	c.validateSchedules(root, errs)
 	c.validatePolicies(root, errs)
 	c.validateRoutes(root, errs)
+	c.validateHeartbeats(root, errs)
 	c.validateNotifications(root, errs)
 
 	if len(errs.Items) > 0 {
@@ -544,6 +547,39 @@ func (c *Config) validateRoutes(root *yaml.Node, errs *Errors) {
 		if len(r.GroupBy) == 0 {
 			errs.Add(line, field+".group_by",
 				"required: without it every alert forms its own incident and grouping does nothing")
+		}
+	}
+}
+
+func (c *Config) validateHeartbeats(root *yaml.Node, errs *Errors) {
+	seen := map[string]int{}
+	for i, h := range c.Heartbeats {
+		field := fmt.Sprintf("heartbeats[%d]", i)
+		line := lineAt(root, "heartbeats", i)
+
+		if h.Name == "" {
+			errs.Add(line, field+".name", "required")
+		} else if prev, dup := seen[h.Name]; dup {
+			errs.Add(line, field+".name",
+				fmt.Sprintf("duplicate heartbeat %q, first defined at heartbeats[%d]", h.Name, prev))
+		} else {
+			seen[h.Name] = i
+		}
+
+		if h.ExpectedInterval.Std() <= 0 {
+			errs.Add(line, field+".expected_interval",
+				"required and must be positive, e.g. 5m")
+		}
+		if h.Team == "" {
+			errs.Add(line, field+".team", "required")
+		} else if _, ok := c.TeamByName(h.Team); !ok {
+			errs.Add(line, field+".team", fmt.Sprintf("unknown team %q", h.Team))
+		}
+		if h.Severity != "" {
+			if sev := core.Severity(strings.ToLower(h.Severity)); !sev.Valid() {
+				errs.Add(line, field+".severity",
+					fmt.Sprintf("unknown severity %q; want critical, warning or info", h.Severity))
+			}
 		}
 	}
 }

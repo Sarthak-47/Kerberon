@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/Sarthak-47/kerberon/internal/core"
 	"github.com/Sarthak-47/kerberon/internal/escalate"
 	"github.com/Sarthak-47/kerberon/internal/group"
+	"github.com/Sarthak-47/kerberon/internal/heartbeat"
 	"github.com/Sarthak-47/kerberon/internal/ingest"
 	"github.com/Sarthak-47/kerberon/internal/notify"
 	"github.com/Sarthak-47/kerberon/internal/notify/channels"
@@ -470,6 +472,34 @@ Flags:
 		},
 	})
 
+	// Register any heartbeat declared in config that does not exist yet. The
+	// token is shown once, here, and is not recoverable afterwards by design.
+	declared := make([]heartbeat.DeclaredHeartbeat, 0, len(cfg.Heartbeats))
+	for _, h := range cfg.Heartbeats {
+		sev := core.Severity(h.Severity)
+		if !sev.Valid() {
+			sev = core.SeverityCritical
+		}
+		declared = append(declared, heartbeat.DeclaredHeartbeat{
+			Name:             h.Name,
+			ExpectedInterval: h.ExpectedInterval.Std(),
+			GracePeriod:      h.GracePeriod.Std(),
+			Team:             h.Team,
+			Severity:         sev,
+		})
+	}
+	newTokens, err := heartbeat.Sync(ctx, db, declared, clk.Now())
+	if err != nil {
+		return err
+	}
+	for name, token := range newTokens {
+		log.Info("registered heartbeat; this token is shown once and cannot be recovered",
+			"heartbeat", name,
+			"ping_url", strings.TrimRight(cfg.Server.ExternalURL, "/")+"/api/v1/heartbeat/"+token)
+	}
+
+	sweeper := heartbeat.New(db, clk, groupEngine, heartbeat.Options{Logger: log})
+
 	ingestSrv, err := ingest.New(groupEngine, clk, ingest.Options{
 		Token:  cfg.Server.IngestToken,
 		Logger: log,
@@ -483,6 +513,7 @@ Flags:
 		Signer:       signer,
 		Acknowledger: engine,
 		Incidents:    db,
+		Heartbeats:   db,
 		Logger:       log,
 	})
 
@@ -501,6 +532,14 @@ Flags:
 		defer close(schedDone)
 		if err := sched.Run(runCtx); err != nil {
 			log.Error("timer scheduler stopped with an error", "error", err)
+		}
+	}()
+
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		if err := sweeper.Run(runCtx); err != nil {
+			log.Error("heartbeat sweeper stopped with an error", "error", err)
 		}
 	}()
 
@@ -529,6 +568,7 @@ Flags:
 		stopRun()
 		<-schedDone
 		<-dispatchDone
+		<-sweepDone
 		if err != nil {
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -544,6 +584,7 @@ Flags:
 	stopRun()
 	<-schedDone
 	<-dispatchDone
+	<-sweepDone
 
 	log.Info("stopped")
 	return nil
