@@ -85,7 +85,8 @@ someone is on call at every instant.
 **Exit criteria — all met**
 - Schedule a timer, `SIGKILL` the process, restart, every escalation step fires
   **exactly once** — asserted by counting one audit row per step across randomised
-  kill/restart cycles. Runs in CI on every push (15 iterations) and nightly (400).
+  kill/restart cycles. Runs in CI on every push (15 iterations) and nightly (1,000, the
+  figure spec section 11 asks for).
 - Cancellation is re-checked inside the executing transaction, so an acknowledgement
   landing as a step fires can never double-execute.
 - A process down past several deadlines catches up on restart in `fire_at` order,

@@ -72,12 +72,14 @@ jobs:
         # SIGKILLs the process at randomised points during an escalation,
         # restarts it, and asserts each step left exactly one audit row.
         # Zero means a missed page; twice means waking someone for nothing.
-        # Unix-only, see DECISIONS.md D10. The nightly run sweeps far more
-        # iterations than a per-push run can afford.
+        # Unix-only, see DECISIONS.md D10. The nightly run sweeps the 1,000
+        # iterations the spec asks for (section 11); a per-push run cannot
+        # afford them and settles for enough to catch an obvious regression.
         env:
           CGO_ENABLED: "0"
-          KERBERON_CHAOS_ITERATIONS: ${{ github.event_name == 'schedule' && '400' || '15' }}
-        run: go test ./internal/timer/ -run Chaos -count=1 -v -timeout 45m
+          KERBERON_CHAOS_ITERATIONS: ${{ github.event_name == 'schedule' && '1000' || '15' }}
+        run: go test ./internal/timer/ -run Chaos -count=1 -v -timeout 180m
+        timeout-minutes: 200
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
