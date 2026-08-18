@@ -206,6 +206,32 @@ func AcknowledgeIncident(ctx context.Context, q Queryer, id int64, at time.Time,
 	return n > 0, nil
 }
 
+// Resolve closes an incident and cancels everything still pending for it.
+//
+// Resolving is the one action that ends an incident outright, so it also stops
+// escalation, the ack timeout and any resolve grace window in the same
+// transaction. It reports whether the incident was open.
+//
+// The caller supplies the time. store holds no clock, and reaching for
+// time.Now here would put the one package that must stay testable-by-injection
+// out of reach of a fake clock.
+func (db *DB) Resolve(ctx context.Context, id int64, by string, now time.Time) (bool, error) {
+	var closed bool
+	err := db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		closed, err = ResolveIncident(ctx, tx, id, now, by)
+		if err != nil || !closed {
+			return err
+		}
+		if _, err := CancelIncidentTimers(ctx, tx, id, now); err != nil {
+			return err
+		}
+		detail := `{"by":"` + by + `","reason":"resolved manually"}`
+		return InsertEvent(ctx, tx, id, core.EventResolved, detail, now)
+	})
+	return closed, err
+}
+
 // ─── Events ───────────────────────────────────────────────────────────────
 
 // InsertEvent appends to an incident's timeline.

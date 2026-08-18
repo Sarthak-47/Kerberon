@@ -209,7 +209,10 @@ func (d *Dispatcher) deliver(ctx context.Context, n core.Notification) {
 	err := ch.Send(ctx, Message{
 		IncidentID:  n.IncidentID,
 		Destination: n.Destination,
+		Title:       n.Title,
 		Body:        n.Body,
+		Severity:    n.Severity,
+		AckLink:     n.AckURL,
 	})
 	if err == nil {
 		d.breaker.Succeed(n.Channel)

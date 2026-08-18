@@ -22,12 +22,16 @@ import (
 	// no tzdata. Spec section 7.2.
 	_ "time/tzdata"
 
+	"github.com/Sarthak-47/kerberon/internal/ack"
 	"github.com/Sarthak-47/kerberon/internal/api"
 	"github.com/Sarthak-47/kerberon/internal/clock"
 	"github.com/Sarthak-47/kerberon/internal/config"
 	"github.com/Sarthak-47/kerberon/internal/core"
+	"github.com/Sarthak-47/kerberon/internal/escalate"
 	"github.com/Sarthak-47/kerberon/internal/group"
 	"github.com/Sarthak-47/kerberon/internal/ingest"
+	"github.com/Sarthak-47/kerberon/internal/notify"
+	"github.com/Sarthak-47/kerberon/internal/notify/channels"
 	"github.com/Sarthak-47/kerberon/internal/route"
 	"github.com/Sarthak-47/kerberon/internal/schedule"
 	"github.com/Sarthak-47/kerberon/internal/store"
@@ -384,23 +388,89 @@ Flags:
 	sched := timer.New(db, clk, timer.Options{Logger: log})
 	router := route.New(cfg)
 
-	// Phase 5 replaces this with the escalation engine. Until then a due page
-	// is recorded on the incident timeline so the behaviour is observable, and
-	// it is logged at warn level so nobody mistakes this for a working pager.
-	onPageDue := func(ctx context.Context, tx *sql.Tx, inc core.Incident) error {
-		log.Warn("incident is due to page, but notification delivery is not implemented yet",
-			"incident_id", inc.ID, "team", inc.Team, "policy", inc.Policy,
-			"title", inc.Title, "alert_count", inc.AlertCount)
-		return store.InsertEvent(ctx, tx, inc.ID, core.EventNotified,
-			`{"note":"delivery not implemented until Phase 5"}`, clk.Now())
+	schedules, err := schedule.FromConfig(cfg)
+	if err != nil {
+		return err
 	}
 
-	engine := group.New(db, clk, router, sched, group.Options{
-		OnPageDue: onPageDue,
-		Logger:    log,
+	signer, err := ack.NewSigner(cfg.Server.SecretKey)
+	if err != nil {
+		return err
+	}
+
+	// Channels are built only where configured. A policy naming one that is
+	// absent fails validation, so an unconfigured channel here means it is
+	// genuinely unused.
+	var chans []notify.Channel
+	if c := cfg.Channels.Ntfy; c != nil {
+		chans = append(chans, channels.NewNtfy(c.DefaultServer, 0))
+	}
+	if c := cfg.Channels.Telegram; c != nil {
+		chans = append(chans, channels.NewTelegram(c.BotToken, 0))
+	}
+	if c := cfg.Channels.Email; c != nil {
+		chans = append(chans, channels.NewEmail(channels.EmailConfig{
+			Host: c.SMTPHost, Port: c.SMTPPort, From: c.From,
+			Username: c.Username, Password: c.Password,
+		}))
+	}
+	if c := cfg.Channels.Webhook; c != nil {
+		chans = append(chans, channels.NewWebhook(c.URL, 0))
+	}
+
+	dispatcher := notify.New(db, clk, chans, notify.Options{
+		MaxAttempts: cfg.Notifications.MaxAttempts,
+		Logger:      log,
+		OnDeadLetter: func(ctx context.Context, tx *sql.Tx, n core.Notification) error {
+			// The paging system failing to page must be a surfaced state, not
+			// a silent drop. Recording it on the incident's own timeline is
+			// the minimum; raising a separate internal incident for it is
+			// Phase 7 work.
+			detail := fmt.Sprintf(
+				`{"dead_letter":true,"channel":%q,"user":%q,"error":%q}`,
+				n.Channel, n.TargetUser, n.LastError)
+			return store.InsertEvent(ctx, tx, n.IncidentID, core.EventNotified, detail, clk.Now())
+		},
 	})
 
-	ingestSrv, err := ingest.New(engine, clk, ingest.Options{
+	engine := escalate.New(db, clk, sched,
+		escalate.NewScheduleTargets(cfg, schedules, db),
+		escalate.NewConfigContacts(cfg),
+		signer,
+		escalate.Options{
+			ExternalURL: cfg.Server.ExternalURL,
+			Dispatcher:  dispatcher,
+			Logger:      log,
+		})
+
+	policies := make(map[string]escalate.Policy, len(cfg.EscalationPolicies))
+	for _, p := range cfg.EscalationPolicies {
+		policies[p.Name] = escalate.PolicyFromConfig(p)
+	}
+
+	// group_wait closing hands straight to the escalation engine. The grouping
+	// engine needs to know nothing about what paging involves.
+	groupEngine := group.New(db, clk, router, sched, group.Options{
+		Logger: log,
+		OnPageDue: func(ctx context.Context, tx *sql.Tx, inc core.Incident) error {
+			policy, ok := policies[inc.Policy]
+			if !ok {
+				// The policy vanished from config while this incident was in
+				// its group_wait window. Saying so is better than paging
+				// nobody quietly.
+				log.Error("incident references a policy that no longer exists; it will not escalate",
+					"incident_id", inc.ID, "policy", inc.Policy)
+				return nil
+			}
+			if err := engine.Begin(ctx, tx, inc, policy); err != nil {
+				return err
+			}
+			dispatcher.Wake()
+			return nil
+		},
+	})
+
+	ingestSrv, err := ingest.New(groupEngine, clk, ingest.Options{
 		Token:  cfg.Server.IngestToken,
 		Logger: log,
 	})
@@ -408,13 +478,12 @@ Flags:
 		return err
 	}
 
-	schedules, err := schedule.FromConfig(cfg)
-	if err != nil {
-		return err
-	}
 	apiSrv := api.New(ingestSrv, schedules, clk, api.Options{
-		Overrides: db,
-		Logger:    log,
+		Overrides:    db,
+		Signer:       signer,
+		Acknowledger: engine,
+		Incidents:    db,
+		Logger:       log,
 	})
 
 	httpSrv := &http.Server{
@@ -435,6 +504,14 @@ Flags:
 		}
 	}()
 
+	dispatchDone := make(chan struct{})
+	go func() {
+		defer close(dispatchDone)
+		if err := dispatcher.Run(runCtx); err != nil {
+			log.Error("notification dispatcher stopped with an error", "error", err)
+		}
+	}()
+
 	serveErr := make(chan error, 1)
 	go func() {
 		log.Info("kerberon listening", "addr", cfg.Server.Listen, "database", db.Path())
@@ -451,6 +528,7 @@ Flags:
 	case err := <-serveErr:
 		stopRun()
 		<-schedDone
+		<-dispatchDone
 		if err != nil {
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -465,6 +543,7 @@ Flags:
 	}
 	stopRun()
 	<-schedDone
+	<-dispatchDone
 
 	log.Info("stopped")
 	return nil

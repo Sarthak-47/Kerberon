@@ -327,8 +327,15 @@ type Notification struct {
 	TargetUser     string
 	Channel        Channel
 	// Destination is the address resolved at send time, not at enqueue time.
-	Destination   string
-	Body          string
+	Destination string
+	Body        string
+	// Title, Severity and AckURL let a dispatch worker render the page from
+	// this row alone: an ntfy priority, a Telegram button, an email subject.
+	// They are captured when the page is composed rather than read from the
+	// incident at send time, so a page describes the situation that caused it.
+	Title         string
+	Severity      Severity
+	AckURL        string
 	State         NotificationState
 	Attempts      int
 	NextAttemptAt *time.Time

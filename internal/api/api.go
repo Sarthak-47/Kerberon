@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Sarthak-47/kerberon/internal/ack"
 	"github.com/Sarthak-47/kerberon/internal/clock"
 	"github.com/Sarthak-47/kerberon/internal/core"
 	"github.com/Sarthak-47/kerberon/internal/ingest"
@@ -39,13 +40,25 @@ type Server struct {
 	overrides OverrideReader
 	clk       clock.Clock
 	log       *slog.Logger
+
+	// signer, acker and incidents are optional: a server built without them
+	// still serves ingest and on-call, and the acknowledgement endpoints say
+	// so plainly rather than failing obscurely.
+	signer    *ack.Signer
+	acker     Acknowledger
+	incidents IncidentStore
 }
 
 // Options configures a Server.
 type Options struct {
 	// Overrides may be nil, in which case rotations resolve without them.
 	Overrides OverrideReader
-	Logger    *slog.Logger
+	// Signer, Acknowledger and Incidents enable the acknowledgement
+	// endpoints. Omit them and those routes report that they are unconfigured.
+	Signer       *ack.Signer
+	Acknowledger Acknowledger
+	Incidents    IncidentStore
+	Logger       *slog.Logger
 }
 
 // New composes the route tree.
@@ -60,6 +73,9 @@ func New(ing *ingest.Server, schedules map[string]*schedule.Schedule, clk clock.
 		overrides: opts.Overrides,
 		clk:       clk,
 		log:       log,
+		signer:    opts.Signer,
+		acker:     opts.Acknowledger,
+		incidents: opts.Incidents,
 	}
 }
 
@@ -82,7 +98,17 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/grafana", s.ingest.HandleGrafana)
 
 		r.Get("/oncall", s.handleOnCall)
+
+		r.Post("/incidents/{id}/ack", s.handleIncidentAck)
+		r.Post("/incidents/{id}/resolve", s.handleIncidentResolve)
 	})
+
+	// The ack link is deliberately outside the authenticated tree: the signed
+	// token is the authentication, and requiring a login here is exactly how
+	// incidents go unacknowledged at 3am. Both methods are accepted because
+	// some mail clients prefetch with GET.
+	r.Get("/ack/{incident}/{user}/{token}", s.handleAckLink)
+	r.Post("/ack/{incident}/{user}/{token}", s.handleAckLink)
 
 	return r
 }

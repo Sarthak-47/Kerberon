@@ -68,6 +68,32 @@ func (s *Signer) Verify(incidentID int64, userID string, step int, token string)
 	return subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1
 }
 
+// VerifyAny checks a token against every step up to and including maxStep,
+// returning which one minted it.
+//
+// The link deliberately does not carry the step number. Including it would let
+// anyone holding one link enumerate the others by editing a digit, and the
+// server already knows how far escalation has run, so trying the steps that
+// could plausibly have minted the token costs nothing. The search is bounded
+// by the incident's own progress rather than by anything the caller supplies.
+func (s *Signer) VerifyAny(incidentID int64, userID string, maxStep int, token string) (int, bool) {
+	if maxStep < 0 {
+		maxStep = 0
+	}
+	// Cap the work regardless of what the incident claims, so a corrupt
+	// current_step cannot turn one request into unbounded hashing.
+	const hardLimit = 256
+	if maxStep > hardLimit {
+		maxStep = hardLimit
+	}
+	for step := 0; step <= maxStep; step++ {
+		if s.Verify(incidentID, userID, step, token) {
+			return step, true
+		}
+	}
+	return 0, false
+}
+
 // canonical encodes the signed fields unambiguously.
 //
 // Each variable-length field is length-prefixed rather than delimited. With a

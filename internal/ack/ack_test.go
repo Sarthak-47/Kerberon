@@ -221,3 +221,44 @@ func TestMalformedLinksAreDistinguishedFromForgedOnes(t *testing.T) {
 		t.Error("a forged token verified")
 	}
 }
+
+// The link does not carry the step, so the server searches the steps that
+// could plausibly have minted the token.
+func TestVerifyAnyFindsTheMintingStep(t *testing.T) {
+	s := signer(t)
+
+	for _, step := range []int{0, 1, 5} {
+		tok := s.Token(42, "sarthak", step)
+		got, ok := s.VerifyAny(42, "sarthak", 10, tok)
+		if !ok {
+			t.Fatalf("token from step %d did not verify", step)
+		}
+		if got != step {
+			t.Errorf("VerifyAny reported step %d, want %d", got, step)
+		}
+	}
+}
+
+// A token from a step escalation has not reached yet must not verify, or the
+// search would hand out authority the incident has not issued.
+func TestVerifyAnyIsBoundedByProgress(t *testing.T) {
+	s := signer(t)
+	tok := s.Token(42, "sarthak", 7)
+
+	if _, ok := s.VerifyAny(42, "sarthak", 3, tok); ok {
+		t.Error("a token from a later step verified against an earlier ceiling")
+	}
+	if _, ok := s.VerifyAny(42, "sarthak", 7, tok); !ok {
+		t.Error("the token should verify once the ceiling reaches its step")
+	}
+}
+
+func TestVerifyAnyRejectsForgeries(t *testing.T) {
+	s := signer(t)
+	if _, ok := s.VerifyAny(42, "sarthak", 20, "AAAAAAAAAAAAAAAAAAAAAA"); ok {
+		t.Error("a forged token verified")
+	}
+	if _, ok := s.VerifyAny(42, "priya", 20, s.Token(42, "sarthak", 0)); ok {
+		t.Error("one recipient's token verified for another")
+	}
+}

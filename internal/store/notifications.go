@@ -16,7 +16,7 @@ import (
 
 const notificationColumns = `id, incident_id, idempotency_key, step_index, target_user,
 	channel, destination, body, state, attempts, next_attempt_at, last_error,
-	created_at, sent_at`
+	created_at, sent_at, title, severity, ack_url`
 
 func scanNotification(row interface{ Scan(...any) error }) (core.Notification, error) {
 	var (
@@ -25,10 +25,11 @@ func scanNotification(row interface{ Scan(...any) error }) (core.Notification, e
 		createdAt         int64
 		nextAttempt, sent sql.NullInt64
 		lastErr           sql.NullString
+		severity          string
 	)
 	err := row.Scan(&n.ID, &n.IncidentID, &n.IdempotencyKey, &n.StepIndex, &n.TargetUser,
 		&channel, &n.Destination, &n.Body, &state, &n.Attempts, &nextAttempt, &lastErr,
-		&createdAt, &sent)
+		&createdAt, &sent, &n.Title, &severity, &n.AckURL)
 	if err != nil {
 		return core.Notification{}, err
 	}
@@ -37,6 +38,7 @@ func scanNotification(row interface{ Scan(...any) error }) (core.Notification, e
 	n.CreatedAt = fromUnix(createdAt)
 	n.NextAttemptAt = fromUnixPtr(nextAttempt)
 	n.SentAt = fromUnixPtr(sent)
+	n.Severity = core.Severity(severity)
 	n.LastError = lastErr.String
 	return n, nil
 }
@@ -96,11 +98,13 @@ func EnqueueNotification(ctx context.Context, q Queryer, n core.Notification) (i
 	res, err := q.ExecContext(ctx, `
 		INSERT INTO notifications
 			(incident_id, idempotency_key, step_index, target_user, channel,
-			 destination, body, state, attempts, next_attempt_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 destination, body, state, attempts, next_attempt_at, created_at,
+			 title, severity, ack_url)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.IncidentID, n.IdempotencyKey, n.StepIndex, n.TargetUser, string(n.Channel),
 		n.Destination, n.Body, string(n.State), n.Attempts,
-		toUnixPtr(n.NextAttemptAt), toUnix(n.CreatedAt))
+		toUnixPtr(n.NextAttemptAt), toUnix(n.CreatedAt),
+		n.Title, string(n.Severity), n.AckURL)
 	if err != nil {
 		// The UNIQUE constraint is the point: a retried escalation cannot
 		// enqueue the same page twice.

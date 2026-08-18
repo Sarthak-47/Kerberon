@@ -165,7 +165,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 5 — Escalation and notification
+## Phase 5 — Escalation and notification — **complete**
 
 **Goal:** the milestone that makes it real.
 
@@ -183,8 +183,11 @@ concurrency test belongs with the load harness in Phase 7.
 - `internal/ack` — HMAC-SHA256 signed ack links, constant-time verification,
   single-purpose, scoped to one incident.
 
-**Exit criteria**
-- **End to end: alert in → phone buzzes → tap to acknowledge → escalation stops.**
+**Exit criteria — met**
+- **End to end, verified against a running server:** 50 alerts in produced one
+  incident and one page carrying severity, title and a signed ack link; tapping the
+  link returned "Incident 1 is yours. Escalation has stopped."; and the second step,
+  due 45 seconds later, never fired.
 - Fake channel failing deterministically proves the backoff schedule, breaker opening,
   failover to the next channel, and dead-lettering.
 - Ack on an already-resolved incident is a no-op, not a crash.

@@ -193,6 +193,9 @@ func (e *Engine) fireStep(ctx context.Context, tx *sql.Tx, inc core.Incident, po
 				Channel:        ch,
 				Destination:    dest,
 				Body:           e.body(inc, user, index),
+				Title:          inc.Title,
+				Severity:       inc.Severity,
+				AckURL:         e.ackLink(inc, user, index),
 				State:          core.NotifPending,
 				CreatedAt:      now,
 			}
@@ -391,12 +394,22 @@ func (e *Engine) handleAckTimeout(ctx context.Context, tx *sql.Tx, t core.Timer)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-// body composes what the human reads.
-func (e *Engine) body(inc core.Incident, userID string, step int) string {
-	link := ""
-	if e.signer != nil && e.baseURL != "" {
-		link = e.signer.Link(e.baseURL, inc.ID, userID, step)
+// ackLink is the one-tap acknowledgement URL for this recipient at this step,
+// or empty when acknowledgement is not configured.
+func (e *Engine) ackLink(inc core.Incident, userID string, step int) string {
+	if e.signer == nil || e.baseURL == "" {
+		return ""
 	}
+	return e.signer.Link(e.baseURL, inc.ID, userID, step)
+}
+
+// body composes what the human reads.
+//
+// The link is repeated in the text as well as carried in AckURL, because a
+// channel that cannot render a button — email, a plain webhook — still has to
+// give the reader something to tap.
+func (e *Engine) body(inc core.Incident, userID string, step int) string {
+	link := e.ackLink(inc, userID, step)
 
 	msg := fmt.Sprintf("[%s] %s", inc.Severity, inc.Title)
 	if inc.AlertCount > 1 {
