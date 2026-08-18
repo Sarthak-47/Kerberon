@@ -87,6 +87,23 @@ type Layer struct {
 	// Rotation is daily or weekly.
 	Rotation string  `yaml:"rotation"`
 	Handoff  Handoff `yaml:"handoff"`
+	// Restriction confines this layer to certain hours, e.g. business hours.
+	// Required for a layer of type restriction, optional on a rotation.
+	// Outside the window the layer puts nobody on call, so a schedule built
+	// only from restricted layers has coverage gaps by construction — which is
+	// exactly what kerberon validate is meant to catch.
+	Restriction *Restriction `yaml:"restriction"`
+}
+
+// Restriction is a recurring window during which a layer applies.
+type Restriction struct {
+	// Days are weekday names. Empty means every day.
+	Days []string `yaml:"days"`
+	// Start and End are 24-hour HH:MM in the layer's timezone. An End at or
+	// before Start describes a window crossing midnight, e.g. 18:00 to 09:00
+	// for an after-hours layer.
+	Start string `yaml:"start"`
+	End   string `yaml:"end"`
 }
 
 // Handoff is when one participant takes over from the next, expressed as

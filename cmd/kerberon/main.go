@@ -22,6 +22,7 @@ import (
 	// no tzdata. Spec section 7.2.
 	_ "time/tzdata"
 
+	"github.com/Sarthak-47/kerberon/internal/api"
 	"github.com/Sarthak-47/kerberon/internal/clock"
 	"github.com/Sarthak-47/kerberon/internal/config"
 	"github.com/Sarthak-47/kerberon/internal/core"
@@ -407,9 +408,18 @@ Flags:
 		return err
 	}
 
+	schedules, err := schedule.FromConfig(cfg)
+	if err != nil {
+		return err
+	}
+	apiSrv := api.New(ingestSrv, schedules, clk, api.Options{
+		Overrides: db,
+		Logger:    log,
+	})
+
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Listen,
-		Handler:           ingestSrv.Routes(),
+		Handler:           apiSrv.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

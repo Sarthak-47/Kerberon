@@ -331,6 +331,48 @@ func (c *Config) validateLayer(root *yaml.Node, errs *Errors, si, li int, l Laye
 		validateTimezone(root, errs, l.Handoff.Timezone, field+".handoff.timezone",
 			[]any{"schedules", si, "layers", li, "handoff", "timezone"}, hline, true)
 	}
+
+	validateRestriction(root, errs, si, li, l, field, line)
+}
+
+func validateRestriction(root *yaml.Node, errs *Errors, si, li int, l Layer, field string, fallbackLine int) {
+	rline := lineAt(root, "schedules", si, "layers", li, "restriction")
+	if rline == 0 {
+		rline = fallbackLine
+	}
+
+	if l.Restriction == nil {
+		if l.Type == LayerRestriction {
+			errs.Add(fallbackLine, field+".restriction",
+				"required for a layer of type restriction: give days, start and end")
+		}
+		return
+	}
+
+	r := l.Restriction
+	if r.Start == "" || r.End == "" {
+		errs.Add(rline, field+".restriction",
+			"both start and end are required, as 24-hour HH:MM")
+	}
+	for _, name := range []struct{ label, value string }{{"start", r.Start}, {"end", r.End}} {
+		if name.value == "" {
+			continue
+		}
+		if _, err := time.Parse("15:04", name.value); err != nil {
+			errs.Add(rline, field+".restriction."+name.label,
+				fmt.Sprintf("invalid time %q; want 24-hour HH:MM such as 09:00", name.value))
+		}
+	}
+	if r.Start != "" && r.Start == r.End {
+		errs.Add(rline, field+".restriction",
+			fmt.Sprintf("start and end are both %q, which covers no time at all", r.Start))
+	}
+	for _, d := range r.Days {
+		if !validDays[strings.ToLower(d)] {
+			errs.Add(rline, field+".restriction.days",
+				fmt.Sprintf("unknown day %q; want monday through sunday", d))
+		}
+	}
 }
 
 func (c *Config) validatePolicies(root *yaml.Node, errs *Errors) {

@@ -90,10 +90,10 @@ func (s *Server) Routes() http.Handler {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(s.authenticate)
-		r.Post("/alerts", s.handleGeneric)
-		r.Post("/alertmanager", s.handleAlertmanager)
-		r.Post("/grafana", s.handleGrafana)
+		r.Use(s.Authenticate)
+		r.Post("/alerts", s.HandleGeneric)
+		r.Post("/alertmanager", s.HandleAlertmanager)
+		r.Post("/grafana", s.HandleGrafana)
 	})
 
 	return r
@@ -101,10 +101,13 @@ func (s *Server) Routes() http.Handler {
 
 // ─── Authentication ───────────────────────────────────────────────────────
 
-// authenticate checks the bearer token in constant time. A variable-time
+// Authenticate checks the bearer token in constant time. It is exported so
+// internal/api can apply the same check to the query endpoints it adds.
+//
+// The comparison is constant time deliberately: a variable-time
 // comparison leaks the token one byte at a time to anyone who can measure
 // response latency, and this token authorises raising incidents.
-func (s *Server) authenticate(next http.Handler) http.Handler {
+func (s *Server) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		presented := bearerToken(r)
 		if subtle.ConstantTimeCompare([]byte(presented), s.token) != 1 {
@@ -133,15 +136,15 @@ func bearerToken(r *http.Request) string {
 
 type parser func(body []byte, receivedAt time.Time) ([]core.Alert, error)
 
-func (s *Server) handleGeneric(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleGeneric(w http.ResponseWriter, r *http.Request) {
 	s.handle(w, r, "generic", alert.ParseGeneric)
 }
 
-func (s *Server) handleAlertmanager(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleAlertmanager(w http.ResponseWriter, r *http.Request) {
 	s.handle(w, r, "alertmanager", alert.ParseAlertmanager)
 }
 
-func (s *Server) handleGrafana(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleGrafana(w http.ResponseWriter, r *http.Request) {
 	s.handle(w, r, "grafana", alert.ParseGrafana)
 }
 

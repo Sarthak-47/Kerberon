@@ -21,8 +21,8 @@ type LayerType string
 
 const (
 	LayerRotation LayerType = "rotation"
-	// LayerRestriction is accepted by config but not yet resolved; see
-	// Schedule.Layers.
+	// LayerRestriction confines a layer to a recurring window; outside it the
+	// layer puts nobody on call.
 	LayerRestriction LayerType = "restriction"
 )
 
@@ -38,6 +38,9 @@ type Layer struct {
 	HandoffHour   int
 	HandoffMinute int
 	Location      *time.Location
+	// Restriction, when set, confines this layer to a recurring window.
+	// Outside it the layer puts nobody on call.
+	Restriction *Restriction
 
 	// anchor is the first handoff at or after anchorRef, precomputed so
 	// rotation position is a subtraction rather than a walk.
@@ -75,6 +78,7 @@ func NewLayer(l Layer) (Layer, error) {
 		if l.Type == LayerRotation {
 			return Layer{}, fmt.Errorf("layer %q is a rotation but names no rotation period", l.Name)
 		}
+		// A restriction layer may hold a fixed person rather than rotating.
 	default:
 		return Layer{}, fmt.Errorf("layer %q has unknown rotation %q", l.Name, l.Rotation)
 	}
@@ -112,6 +116,11 @@ func FromConfig(cfg *config.Config) (map[string]*Schedule, error) {
 				return nil, fmt.Errorf("schedule %q layer %q: %w", cs.Name, cl.Name, err)
 			}
 
+			restriction, err := NewRestriction(cl.Restriction)
+			if err != nil {
+				return nil, fmt.Errorf("schedule %q layer %q: %w", cs.Name, cl.Name, err)
+			}
+
 			layer, err := NewLayer(Layer{
 				Name:          cl.Name,
 				Type:          LayerType(cl.Type),
@@ -121,6 +130,7 @@ func FromConfig(cfg *config.Config) (map[string]*Schedule, error) {
 				HandoffHour:   hour,
 				HandoffMinute: minute,
 				Location:      layerLoc,
+				Restriction:   restriction,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("schedule %q: %w", cs.Name, err)
@@ -224,20 +234,35 @@ func (l Layer) position(handoff time.Time) int {
 
 // userAt returns the participant on call at t, if this layer covers it.
 func (l Layer) userAt(t time.Time) (string, bool) {
-	if l.Type != LayerRotation || len(l.Participants) == 0 {
+	if len(l.Participants) == 0 {
 		return "", false
+	}
+	// Outside its window a restricted layer covers nobody, which is what
+	// produces a genuine coverage gap when no layer sits behind it.
+	if l.Restriction != nil && !l.Restriction.covers(t, l.Location) {
+		return "", false
+	}
+	// A layer with participants but no rotation holds the same person
+	// throughout, which is a legitimate way to write a fixed assignment.
+	if l.Rotation == "" {
+		return l.Participants[0], true
 	}
 	return l.Participants[l.position(l.prevHandoff(t))], true
 }
 
 // boundaries lists this layer's transition instants within (from, to].
+//
+// Both kinds of edge matter: a handoff changes who is on call, and a
+// restriction edge changes whether anyone is.
 func (l Layer) boundaries(from, to time.Time) []time.Time {
-	if l.Type != LayerRotation {
-		return nil
-	}
 	var out []time.Time
-	for h := l.nextHandoff(from); !h.After(to); h = l.nextHandoff(h) {
-		out = append(out, h)
+	if l.Rotation != "" {
+		for h := l.nextHandoff(from); !h.After(to); h = l.nextHandoff(h) {
+			out = append(out, h)
+		}
+	}
+	if l.Restriction != nil {
+		out = append(out, l.Restriction.boundaries(from, to, l.Location)...)
 	}
 	return out
 }

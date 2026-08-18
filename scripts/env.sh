@@ -14,7 +14,10 @@
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -x "$ROOT/.toolchain/go/bin/go" ]; then
+# Git Bash on Windows sees go.exe, so check both spellings; otherwise a
+# Windows contributor silently falls through to "no toolchain found" even
+# though .toolchain/go is populated.
+if [ -x "$ROOT/.toolchain/go/bin/go" ] || [ -x "$ROOT/.toolchain/go/bin/go.exe" ]; then
     export GOROOT="$ROOT/.toolchain/go"
     export PATH="$GOROOT/bin:$PATH"
 elif command -v go >/dev/null 2>&1; then

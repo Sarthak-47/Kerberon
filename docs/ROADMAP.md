@@ -136,7 +136,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 4 — Schedules
+## Phase 4 — Schedules — **complete**
 
 **Goal:** correct answers about time, including twice a year when it is hard.
 
@@ -149,14 +149,19 @@ concurrency test belongs with the load harness in Phase 7.
 - Coverage-gap detection surfaced in `kerberon validate` and the UI.
 - `/api/v1/oncall?team=X&at=<ts>`.
 
-**Exit criteria**
-- `kerberon oncall --team platform --at <ts>` returns the right person for any instant.
-- Property test: over any 400-day window, intervals cover it with **no gaps and no
-  overlaps**.
+**Exit criteria — all met**
+- `kerberon oncall` returns the right person for any instant and renders a rota over a
+  window. `GET /api/v1/oncall` does the same over HTTP, with `team=`, `schedule=`,
+  `at=` and `days=` filters.
+- Property test: over any 400-day window intervals cover it with **no gaps and no
+  overlaps**, across sixteen combinations of zone, rotation period and team size.
 - Table tests pass against real historical DST transitions in America/New_York,
   Europe/London, Australia/Sydney (opposite hemisphere) and Asia/Kolkata (half-hour
   offset, no DST — control).
-- `validate` fails a config containing a deliberate coverage gap.
+- `validate` fails a business-hours-only config, reporting every hole including the
+  63-hour weekend one.
+- Restriction layers resolve, including windows crossing midnight, and hold their wall
+  clock across DST.
 
 ---
 
