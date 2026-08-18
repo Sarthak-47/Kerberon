@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Sarthak-47/kerberon/internal/core"
 )
 
 // Config is a parsed kerberon.yaml.
@@ -201,13 +203,15 @@ type Notifications struct {
 
 // ─── Target ───────────────────────────────────────────────────────────────
 
-// TargetKind is what a policy step points at.
-type TargetKind string
+// TargetKind is what a policy step points at. It is an alias for the core type
+// because an incident's policy snapshot carries these values, and the
+// escalation engine reads them back without config in the picture.
+type TargetKind = core.TargetKind
 
 const (
-	TargetSchedule TargetKind = "schedule"
-	TargetUser     TargetKind = "user"
-	TargetTeam     TargetKind = "team"
+	TargetSchedule = core.TargetSchedule
+	TargetUser     = core.TargetUser
+	TargetTeam     = core.TargetTeam
 )
 
 // Target is a step's recipient, written as "schedule:platform-primary",

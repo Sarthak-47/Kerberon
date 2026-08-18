@@ -266,6 +266,17 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // without naming it the scheduler would retry the same doomed work forever.
 var errSelfCancelled = errors.New("timer handler cancelled its own timer")
 
+// RunDueForTest executes at most one due timer synchronously.
+//
+// Run drives the same work in a loop against a real or fake clock. This exists
+// so a test can advance a fake clock and then assert the resulting state
+// without racing a background goroutine, which is the difference between a
+// deterministic state-machine test and a flaky one.
+func (s *Scheduler) RunDueForTest(ctx context.Context) error {
+	_, err := s.step(ctx)
+	return err
+}
+
 // batchSize is how many upcoming timers step considers. A timer backing off
 // after a failure must not block the ones behind it, so the scheduler looks at
 // a small window rather than only the single earliest row.

@@ -205,6 +205,29 @@ func (s HeartbeatState) Valid() bool {
 	return false
 }
 
+// TargetKind is what an escalation step points at.
+//
+// It lives here rather than in config because an incident stores its resolved
+// policy as a snapshot, so the escalation engine reads these values back
+// without config being involved.
+type TargetKind string
+
+const (
+	// TargetSchedule resolves through a rotation at the moment the step fires.
+	TargetSchedule TargetKind = "schedule"
+	TargetUser     TargetKind = "user"
+	// TargetTeam pages everyone, which is what the last rung usually is.
+	TargetTeam TargetKind = "team"
+)
+
+func (k TargetKind) Valid() bool {
+	switch k {
+	case TargetSchedule, TargetUser, TargetTeam:
+		return true
+	}
+	return false
+}
+
 // EventKind labels an entry in an incident's timeline.
 type EventKind string
 
