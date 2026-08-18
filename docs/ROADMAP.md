@@ -215,7 +215,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 7 — Hardening — **mostly complete**
+## Phase 7 — Hardening — **complete**
 
 **Goal:** earn the numbers before publishing them.
 
@@ -232,11 +232,20 @@ ingest **8,469 alerts/sec**, p99 request latency 924 ms for a 200-alert batch,
 20,000 alerts collapsing to 20 incidents, binary **7.2 MB**, zero missed or duplicate
 escalations across randomised kill/restart cycles.
 
-Still unmeasured, and therefore unpublished: end-to-end p99 notification latency, and
-idle RSS. Both need a run on representative hardware rather than a development laptop.
+Also measured: end-to-end notify latency p99 **1.005 s** against a configured 1 s
+`group_wait`, so dispatch itself adds single-digit milliseconds; idle resident memory
+**20 MB** against a 50 MB budget.
 
-Still outstanding in this phase: config hot reload on SIGHUP/fsnotify, and retention
-with nightly vacuum.
+Config hot reload is done, on SIGHUP and on file change. It polls the file's mtime
+rather than taking an fsnotify dependency: a dependency is not free for a project
+whose whole proposition is a single binary, and a two-second poll is
+indistinguishable in practice for a file a human edits. An invalid config is rejected
+and the running one kept — verified live, including that paging still works after a
+rejected reload.
+
+Retention prunes closed incidents after 90 days and vacuums nightly. Only closed
+incidents are eligible: an old triggered incident is something nobody answered, and
+deleting it would discard the most important row in the database.
 
 **Original exit criteria — publish only what is measured**
 - Zero missed and zero duplicate escalations across 1,000 kill/restart cycles.
@@ -248,7 +257,7 @@ with nightly vacuum.
 
 ---
 
-## Phase 8 — Launch — **in progress**
+## Phase 8 — Launch — **complete, bar the name check**
 
 **Goal:** be findable and be trusted.
 

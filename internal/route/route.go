@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sarthak-47/kerberon/internal/alert"
@@ -47,8 +48,12 @@ func (r Route) Fingerprint(labels core.Labels) string {
 }
 
 // Router matches alerts to routes.
+//
+// The route table is swapped atomically on config reload. Ingest reads it on
+// every alert, so a mutex here would serialise the hot path behind an
+// operation that happens when somebody edits a file.
 type Router struct {
-	routes []Route
+	routes atomic.Pointer[[]Route]
 }
 
 // New builds a Router from configuration. Defaults have already been applied by
@@ -68,7 +73,17 @@ func New(cfg *config.Config) *Router {
 			VolatileLabels: append([]string(nil), c.VolatileLabels...),
 		})
 	}
-	return &Router{routes: rs}
+	r := &Router{}
+	r.routes.Store(&rs)
+	return r
+}
+
+// Replace swaps the route table. Alerts already in flight finish against
+// whichever table they started with, which is correct: a half-applied routing
+// change is worse than a marginally stale one.
+func (r *Router) Replace(rs []Route) {
+	copied := append([]Route(nil), rs...)
+	r.routes.Store(&copied)
 }
 
 // routeName returns the configured name, or derives a stable one.
@@ -110,7 +125,7 @@ func routeName(c config.Route, index int) string {
 // which is precisely the failure this product exists to prevent. Callers must
 // surface that loudly rather than dropping it; see ErrNoRoute.
 func (r *Router) Match(labels core.Labels) (Route, bool) {
-	for _, rt := range r.routes {
+	for _, rt := range *r.routes.Load() {
 		if matches(rt.Match, labels) {
 			return rt, true
 		}
@@ -119,7 +134,7 @@ func (r *Router) Match(labels core.Labels) (Route, bool) {
 }
 
 // Routes returns every configured route, in evaluation order.
-func (r *Router) Routes() []Route { return r.routes }
+func (r *Router) Routes() []Route { return *r.routes.Load() }
 
 // ErrNoRoute reports an alert that matched no route. It carries the labels so
 // the operator can see what arrived and fix the config.

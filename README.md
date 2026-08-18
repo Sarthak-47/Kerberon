@@ -131,6 +131,8 @@ kerberon-bench --url http://127.0.0.1:8080 --token "$KERBERON_INGEST_TOKEN" \
 | Ingest throughput | **8,469 alerts/sec** | ≥ 5,000/sec |
 | Request latency (200-alert batch) | p50 127 ms · p99 924 ms | — |
 | Cascade collapse | **20,000 alerts → 20 incidents** | ≤ 3 pages per cascade |
+| End-to-end notify latency | **p99 1.005 s** with a 1 s `group_wait` configured, so dispatch adds single-digit ms | < 2 s excluding `group_wait` |
+| Idle resident memory | **20 MB** | < 50 MB |
 | Binary size | **7.2 MB** | < 25 MB |
 | Missed or duplicate escalations | **zero**, across randomised kill/restart cycles | zero |
 
@@ -138,9 +140,9 @@ The throughput figure is honest about its history: the first measurement was
 1,492 alerts/sec, and the benchmark exposed a quadratic dedup query that no unit test
 could have caught. See `docs/DECISIONS.md` and the commit history.
 
-**Numbers not yet measured:** end-to-end p99 notification latency, and idle RSS. The
-harness for both exists; neither has been run on representative hardware, so neither
-is published.
+All of these come from a 28-core Windows development machine, which is not a $5 VPS.
+Treat them as an upper bound on what this code can do, not a promise about your
+hardware — and re-run the benchmark on yours before quoting anything.
 
 ## What happens when Kerberon itself goes down
 
@@ -190,6 +192,16 @@ kerberon migrate    Create or upgrade the database schema
 kerberon oncall     Print who is on call, or a rota over a window
 kerberon version    Version information
 ```
+
+Configuration is hot-reloaded on `SIGHUP` and when the file changes on disk. An
+invalid config **never** replaces a running one — a typo taking paging offline would
+be far worse than briefly running on a stale config. The listen address, database path
+and secret key still need a restart, and the log says so rather than pretending
+otherwise.
+
+Closed incidents are pruned after 90 days and the database vacuumed nightly; SQLite
+does not shrink a file on `DELETE`, so without that a pruned year still occupies a
+year of disk.
 
 `validate` is meant to run in CI. It fails on unknown references, invalid timezones,
 unset `${VAR}`s, a user paged on a channel they have no address for, and **coverage
@@ -250,6 +262,8 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Contributions need a DCO sign-off
   that amend the original spec and why
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased build plan and what each phase actually
   demonstrated
+- [`docs/MIGRATING-FROM-GRAFANA-ONCALL.md`](docs/MIGRATING-FROM-GRAFANA-ONCALL.md) —
+  concept mapping, a cutover plan, and a frank list of what does not carry over
 - [`examples/kerberon.yaml`](examples/kerberon.yaml) — a complete, commented config
 
 ## License

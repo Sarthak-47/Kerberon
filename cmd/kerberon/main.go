@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/Sarthak-47/kerberon/internal/group"
 	"github.com/Sarthak-47/kerberon/internal/heartbeat"
 	"github.com/Sarthak-47/kerberon/internal/ingest"
+	"github.com/Sarthak-47/kerberon/internal/maintenance"
 	"github.com/Sarthak-47/kerberon/internal/notify"
 	"github.com/Sarthak-47/kerberon/internal/notify/channels"
 	"github.com/Sarthak-47/kerberon/internal/route"
@@ -368,10 +370,11 @@ Flags:
 	}
 	log := slog.New(handler)
 
-	cfg, err := config.Load(*path)
+	watcher, err := config.NewWatcher(*path, log)
 	if err != nil {
 		return err
 	}
+	cfg := watcher.Current()
 
 	db, err := store.Open(ctx, cfg.Database.Path, store.Options{})
 	if err != nil {
@@ -436,9 +439,12 @@ Flags:
 		},
 	})
 
+	targets := escalate.NewScheduleTargets(cfg, schedules, db)
+	contacts := escalate.NewConfigContacts(cfg)
+
 	engine := escalate.New(db, clk, sched,
-		escalate.NewScheduleTargets(cfg, schedules, db),
-		escalate.NewConfigContacts(cfg),
+		targets,
+		contacts,
 		signer,
 		escalate.Options{
 			ExternalURL: cfg.Server.ExternalURL,
@@ -446,17 +452,19 @@ Flags:
 			Logger:      log,
 		})
 
-	policies := make(map[string]escalate.Policy, len(cfg.EscalationPolicies))
+	initialPolicies := make(map[string]escalate.Policy, len(cfg.EscalationPolicies))
 	for _, p := range cfg.EscalationPolicies {
-		policies[p.Name] = escalate.PolicyFromConfig(p)
+		initialPolicies[p.Name] = escalate.PolicyFromConfig(p)
 	}
+	var policies atomic.Pointer[map[string]escalate.Policy]
+	policies.Store(&initialPolicies)
 
 	// group_wait closing hands straight to the escalation engine. The grouping
 	// engine needs to know nothing about what paging involves.
 	groupEngine := group.New(db, clk, router, sched, group.Options{
 		Logger: log,
 		OnPageDue: func(ctx context.Context, tx *sql.Tx, inc core.Incident) error {
-			policy, ok := policies[inc.Policy]
+			policy, ok := (*policies.Load())[inc.Policy]
 			if !ok {
 				// The policy vanished from config while this incident was in
 				// its group_wait window. Saying so is better than paging
@@ -500,6 +508,50 @@ Flags:
 	}
 
 	sweeper := heartbeat.New(db, clk, groupEngine, heartbeat.Options{Logger: log})
+
+	maint := maintenance.New(db, clk, maintenance.Options{
+		Retention: maintenance.DefaultRetention,
+		Logger:    log,
+	})
+
+	// A reload rebuilds routing, schedules, contacts and policies. It
+	// deliberately does not touch the listen address, the database path or the
+	// secret key: changing those needs a restart, and pretending otherwise
+	// would leave the process in a state its logs did not describe.
+	//
+	// In-flight incidents are unaffected by a policy change because each
+	// carries its own policy snapshot (DECISIONS D4).
+	watcher.OnReload = func(next *config.Config) {
+		if next.Server.Listen != cfg.Server.Listen ||
+			next.Database.Path != cfg.Database.Path ||
+			next.Server.SecretKey != cfg.Server.SecretKey {
+			log.Warn("listen address, database path and secret key are not reloadable; restart to apply those",
+				"path", *path)
+		}
+
+		nextSchedules, err := schedule.FromConfig(next)
+		if err != nil {
+			log.Error("reloaded config has unusable schedules; keeping the previous ones", "error", err)
+			return
+		}
+
+		nextPolicies := make(map[string]escalate.Policy, len(next.EscalationPolicies))
+		for _, p := range next.EscalationPolicies {
+			nextPolicies[p.Name] = escalate.PolicyFromConfig(p)
+		}
+
+		router.Replace(route.New(next).Routes())
+		targets.Replace(next, nextSchedules, db)
+		contacts.Replace(next)
+		policies.Store(&nextPolicies)
+
+		// Escalation now uses the new configuration. The API and UI hold their
+		// own schedule map and keep serving the previous one until a restart;
+		// that is a read-path staleness rather than a paging error, but it is
+		// not silent.
+		log.Info("reload applied to routing, schedules, contacts and policies",
+			"note", "the API and UI schedule views update on restart")
+	}
 
 	ingestSrv, err := ingest.New(groupEngine, clk, ingest.Options{
 		Token:  cfg.Server.IngestToken,
@@ -546,6 +598,26 @@ Flags:
 		}
 	}()
 
+	maintDone := make(chan struct{})
+	go func() {
+		defer close(maintDone)
+		if err := maint.Run(runCtx); err != nil {
+			log.Error("maintenance stopped with an error", "error", err)
+		}
+	}()
+
+	// SIGHUP is the conventional "re-read your configuration" signal; the
+	// watcher also polls the file so an edit applies without one.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		_ = watcher.Watch(runCtx, hup)
+	}()
+
 	sweepDone := make(chan struct{})
 	go func() {
 		defer close(sweepDone)
@@ -580,6 +652,8 @@ Flags:
 		<-schedDone
 		<-dispatchDone
 		<-sweepDone
+		<-maintDone
+		<-watchDone
 		if err != nil {
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -596,6 +670,8 @@ Flags:
 	<-schedDone
 	<-dispatchDone
 	<-sweepDone
+	<-maintDone
+	<-watchDone
 
 	log.Info("stopped")
 	return nil
