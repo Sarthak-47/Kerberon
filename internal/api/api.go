@@ -48,6 +48,8 @@ type Server struct {
 	acker      Acknowledger
 	incidents  IncidentStore
 	heartbeats HeartbeatRecorder
+	// ui is mounted under /ui when configured.
+	ui http.Handler
 }
 
 // Options configures a Server.
@@ -60,7 +62,9 @@ type Options struct {
 	Acknowledger Acknowledger
 	Incidents    IncidentStore
 	Heartbeats   HeartbeatRecorder
-	Logger       *slog.Logger
+	// UI is mounted under /ui. Optional: the API serves fine without it.
+	UI     http.Handler
+	Logger *slog.Logger
 }
 
 // New composes the route tree.
@@ -79,6 +83,7 @@ func New(ing *ingest.Server, schedules map[string]*schedule.Schedule, clk clock.
 		acker:      opts.Acknowledger,
 		incidents:  opts.Incidents,
 		heartbeats: opts.Heartbeats,
+		ui:         opts.UI,
 	}
 }
 
@@ -115,6 +120,14 @@ func (s *Server) Routes() http.Handler {
 	// curl in a crontab that cannot set a header.
 	r.Get("/api/v1/heartbeat/{token}", s.handleHeartbeatPing)
 	r.Post("/api/v1/heartbeat/{token}", s.handleHeartbeatPing)
+
+	if s.ui != nil {
+		r.Mount("/ui", s.ui)
+		// Land somewhere useful rather than on a 404.
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/ui/", http.StatusFound)
+		})
+	}
 
 	r.Get("/ack/{incident}/{user}/{token}", s.handleAckLink)
 	r.Post("/ack/{incident}/{user}/{token}", s.handleAckLink)

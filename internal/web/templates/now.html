@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1>Now</h1>
+
+<h2>On call</h2>
+<div class="card">
+{{if .OnCall}}<table>
+<tr><th>Schedule</th><th>Team</th><th>On call</th></tr>
+{{range .OnCall}}<tr>
+  <td>{{.Schedule}}</td><td class="dim">{{.Team}}</td>
+  <td>{{if .Covered}}{{.User}}{{else}}<span class="bad">NOBODY ON CALL</span>{{end}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No schedules configured.</p>{{end}}
+</div>
+
+<h2>Open incidents</h2>
+<div class="card">
+{{if .Incidents}}<table>
+<tr><th>#</th><th>Severity</th><th>Title</th><th>Team</th><th>Status</th><th>Step</th><th>Alerts</th><th>Age</th></tr>
+{{range .Incidents}}<tr>
+  <td><a href="/ui/incidents/{{.ID}}">{{.ID}}</a></td>
+  <td><span class="pill {{severityClass .Severity}}">{{.Severity}}</span></td>
+  <td>{{.Title}}</td>
+  <td class="dim">{{.Team}}</td>
+  <td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td>
+  <td class="dim">{{.CurrentStep}}</td>
+  <td class="dim">{{.AlertCount}}{{if .DedupCount}} <span class="dim">({{.DedupCount}} dup)</span>{{end}}</td>
+  <td class="dim">{{since .CreatedAt}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">Nothing is on fire.</p>{{end}}
+</div>
+
+<h2>Heartbeats</h2>
+<div class="card">
+{{if .Heartbeats}}<table>
+<tr><th>Name</th><th>Team</th><th>State</th><th>Every</th><th>Grace</th><th>Last ping</th></tr>
+{{range .Heartbeats}}<tr>
+  <td>{{.Name}}</td><td class="dim">{{.Team}}</td>
+  <td><span class="pill {{heartbeatClass .State}}">{{.State}}</span></td>
+  <td class="dim">{{.ExpectedInterval}}</td>
+  <td class="dim">{{.GracePeriod}}</td>
+  <td class="dim">{{if .LastPingAt}}{{since .LastPingAt}} ago{{else}}never{{end}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No heartbeats registered.</p>{{end}}
+</div>
+{{end}}

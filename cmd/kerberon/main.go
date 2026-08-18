@@ -38,6 +38,7 @@ import (
 	"github.com/Sarthak-47/kerberon/internal/schedule"
 	"github.com/Sarthak-47/kerberon/internal/store"
 	"github.com/Sarthak-47/kerberon/internal/timer"
+	"github.com/Sarthak-47/kerberon/internal/web"
 )
 
 // Set via -ldflags at release time.
@@ -508,12 +509,22 @@ Flags:
 		return err
 	}
 
+	ui, err := web.New(db, cfg, schedules, clk, web.Options{
+		Channels: chans,
+		Version:  version,
+		Logger:   log,
+	})
+	if err != nil {
+		return err
+	}
+
 	apiSrv := api.New(ingestSrv, schedules, clk, api.Options{
 		Overrides:    db,
 		Signer:       signer,
 		Acknowledger: engine,
 		Incidents:    db,
 		Heartbeats:   db,
+		UI:           ui.Routes(),
 		Logger:       log,
 	})
 

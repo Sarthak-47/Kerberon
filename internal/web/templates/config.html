@@ -1,0 +1,51 @@
+{{define "content"}}
+<h1>Config</h1>
+<p class="dim">Read-only. Configuration lives in your git repository, not here.</p>
+
+{{if .Gaps}}
+<h2>Coverage gaps</h2>
+<div class="card"><table>
+<tr><th>Schedule</th><th>From</th><th>To</th><th>Duration</th></tr>
+{{range .Gaps}}<tr>
+  <td class="bad">{{.Schedule}}</td><td>{{.Start}}</td><td>{{.End}}</td><td>{{.Duration}}</td>
+</tr>{{end}}
+</table></div>
+{{else}}
+<h2>Coverage</h2>
+<div class="card"><p class="empty">No gaps in the next 400 days.</p></div>
+{{end}}
+
+<h2>Users</h2>
+<div class="card"><table>
+<tr><th>ID</th><th>Name</th><th>Timezone</th><th>Contacts</th></tr>
+{{range .Users}}<tr>
+  <td>{{.ID}}</td><td>{{.Name}}</td><td class="dim">{{.Timezone}}</td>
+  <td class="mono dim">{{.Contacts}}</td>
+</tr>{{end}}
+</table></div>
+
+<h2>Teams</h2>
+<div class="card"><table>
+<tr><th>Name</th><th>Members</th></tr>
+{{range .Teams}}<tr><td>{{.Name}}</td><td class="dim">{{.Members}}</td></tr>{{end}}
+</table></div>
+
+<h2>Escalation policies</h2>
+<div class="card"><table>
+<tr><th>Name</th><th>Repeat</th><th>Ack timeout</th><th>Steps</th></tr>
+{{range .Policies}}<tr>
+  <td>{{.Name}}</td><td class="dim">{{.Repeat}}</td><td class="dim">{{.AckTimeout}}</td>
+  <td class="mono dim">{{.Steps}}</td>
+</tr>{{end}}
+</table></div>
+
+<h2>Routes</h2>
+<div class="card"><table>
+<tr><th>Name</th><th>Match</th><th>Team</th><th>Policy</th><th>Group by</th><th>Wait</th></tr>
+{{range .Routes}}<tr>
+  <td>{{.Name}}</td><td class="mono dim">{{.Match}}</td>
+  <td class="dim">{{.Team}}</td><td class="dim">{{.Policy}}</td>
+  <td class="mono dim">{{.GroupBy}}</td><td class="dim">{{.GroupWait}}</td>
+</tr>{{end}}
+</table></div>
+{{end}}

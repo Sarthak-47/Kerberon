@@ -1,0 +1,48 @@
+{{define "content"}}
+<h1>Incident {{.Incident.ID}} <span class="pill {{statusClass .Incident.Status}}">{{.Incident.Status}}</span></h1>
+<p>{{.Incident.Title}}</p>
+<p class="dim">
+  team {{.Incident.Team}} &middot; policy {{.Incident.Policy}} &middot;
+  severity {{.Incident.Severity}} &middot; step {{.Incident.CurrentStep}} &middot;
+  opened {{fmtTime .Incident.CreatedAt}}
+  {{if .Incident.AcknowledgedAt}}&middot; acknowledged by {{.Incident.AcknowledgedBy}} at {{fmtTimePtr .Incident.AcknowledgedAt}}{{end}}
+  {{if .Incident.ResolvedAt}}&middot; resolved by {{.Incident.ResolvedBy}} at {{fmtTimePtr .Incident.ResolvedAt}}{{end}}
+</p>
+
+<h2>Timeline</h2>
+<div class="card">
+{{if .Events}}<table>
+<tr><th>When</th><th>What</th><th>Detail</th></tr>
+{{range .Events}}<tr>
+  <td class="dim">{{fmtTime .CreatedAt}}</td>
+  <td>{{.Kind}}</td>
+  <td class="mono dim">{{.Detail}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No events.</p>{{end}}
+</div>
+
+<h2>Notifications</h2>
+<div class="card">
+{{if .Notifications}}<table>
+<tr><th>Channel</th><th>To</th><th>Step</th><th>State</th><th>Attempts</th><th>Last error</th></tr>
+{{range .Notifications}}<tr>
+  <td>{{.Channel}}</td><td>{{.TargetUser}}</td><td class="dim">{{.StepIndex}}</td>
+  <td><span class="pill {{notifClass .State}}">{{.State}}</span></td>
+  <td class="dim">{{.Attempts}}</td>
+  <td class="mono dim">{{.LastError}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No notifications yet.</p>{{end}}
+</div>
+
+<h2>Alerts</h2>
+<div class="card">
+{{if .Alerts}}<table>
+<tr><th>Status</th><th>Source</th><th>Labels</th><th>Received</th></tr>
+{{range .Alerts}}<tr>
+  <td>{{.Status}}</td><td class="dim">{{.Source}}</td>
+  <td class="mono dim">{{labels .Labels}}</td>
+  <td class="dim">{{fmtTime .ReceivedAt}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No alerts.</p>{{end}}
+</div>
+{{end}}

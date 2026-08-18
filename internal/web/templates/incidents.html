@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Incidents</h1>
+<p class="dim">
+  <a href="/ui/incidents">All</a> &middot;
+  <a href="/ui/incidents?status=triggered">Triggered</a> &middot;
+  <a href="/ui/incidents?status=acknowledged">Acknowledged</a> &middot;
+  <a href="/ui/incidents?status=resolved">Resolved</a> &middot;
+  <a href="/ui/incidents?status=expired">Expired</a>
+</p>
+<div class="card">
+{{if .Incidents}}<table>
+<tr><th>#</th><th>Severity</th><th>Title</th><th>Team</th><th>Status</th><th>Alerts</th><th>Opened</th></tr>
+{{range .Incidents}}<tr>
+  <td><a href="/ui/incidents/{{.ID}}">{{.ID}}</a></td>
+  <td><span class="pill {{severityClass .Severity}}">{{.Severity}}</span></td>
+  <td>{{.Title}}</td>
+  <td class="dim">{{.Team}}</td>
+  <td><span class="pill {{statusClass .Status}}">{{.Status}}</span></td>
+  <td class="dim">{{.AlertCount}}</td>
+  <td class="dim">{{fmtTime .CreatedAt}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No incidents match.</p>{{end}}
+</div>
+{{end}}

@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>Settings</h1>
+
+<h2>Test a notification</h2>
+<p class="dim">
+  Most on-call setup failures are a wrong contact discovered at the worst
+  possible moment. Send yourself a test and confirm your phone actually buzzes
+  <em>before</em> an incident depends on it.
+</p>
+<div class="card">
+{{if .Contacts}}<table>
+<tr><th>User</th><th>Channel</th><th>Destination</th><th></th><th>Result</th></tr>
+{{range .Contacts}}<tr>
+  <td>{{.User}}</td><td>{{.Channel}}</td><td class="mono dim">{{.Destination}}</td>
+  <td>
+    <form method="post" action="/ui/settings/test">
+      <input type="hidden" name="user" value="{{.User}}">
+      <input type="hidden" name="channel" value="{{.Channel}}">
+      <button type="submit">Send test</button>
+    </form>
+  </td>
+  <td>{{if .Tested}}{{if .TestError}}<span class="bad">{{.TestError}}</span>{{else}}<span class="pill ok">delivered</span>{{end}}{{end}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No contacts configured.</p>{{end}}
+</div>
+
+<h2>Server</h2>
+<div class="card"><table>
+<tr><th>Setting</th><th>Value</th></tr>
+<tr><td>External URL</td><td class="mono">{{.ExternalURL}}</td></tr>
+<tr><td>Database</td><td class="mono">{{.DatabasePath}}</td></tr>
+<tr><td>Version</td><td class="mono">{{.Version}}</td></tr>
+<tr><td>Channels available</td><td class="mono">{{.Channels}}</td></tr>
+</table></div>
+{{end}}

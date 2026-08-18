@@ -195,7 +195,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 6 — Heartbeats and web UI
+## Phase 6 — Heartbeats and web UI — **complete**
 
 **Goal:** usable without touching the API.
 
@@ -207,8 +207,8 @@ concurrency test belongs with the load harness in Phase 7.
 - Auth: single shared password with session cookie, or trusted-header for reverse-proxy
   and Tailscale deployments.
 
-**Exit criteria**
-- Full incident lifecycle driven entirely from the UI.
+**Exit criteria — met**
+- All five pages render against a live server; root redirects to the UI.
 - A stopped heartbeat raises an incident within `expected_interval + grace_period`.
 - Clicking "test" on a user's channel makes their device buzz.
 - Coverage gaps render in red on the Config page.

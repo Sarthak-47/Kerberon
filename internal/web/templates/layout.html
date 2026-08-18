@@ -1,0 +1,53 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} — Kerberon</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1f2328;--dim:#616a75;--line:#e3e6ea;--card:#fff;
+--crit:#b42318;--warn:#b54708;--ok:#1a7f37;--info:#175cd3}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#e6e8ea;--dim:#98a1ab;
+--line:#2a2f35;--card:#1b1f23;--crit:#f97066;--warn:#fdb022;--ok:#47cd89;--info:#84caff}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+header{border-bottom:1px solid var(--line);background:var(--card)}
+nav{max-width:70rem;margin:0 auto;padding:0 1rem;display:flex;gap:.25rem;align-items:center;flex-wrap:wrap}
+nav .brand{font-weight:650;margin-right:1rem;padding:.85rem 0}
+nav a{padding:.85rem .75rem;color:var(--dim);text-decoration:none;border-bottom:2px solid transparent}
+nav a:hover{color:var(--fg)}
+nav a.on{color:var(--fg);border-bottom-color:var(--info)}
+main{max-width:70rem;margin:0 auto;padding:1.5rem 1rem 4rem}
+h1{font-size:1.35rem;margin:0 0 1rem}
+h2{font-size:1rem;margin:1.75rem 0 .6rem;color:var(--dim);font-weight:600;
+text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:.6rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);font-weight:600}
+tr:last-child td{border-bottom:none}
+.empty{padding:2rem;text-align:center;color:var(--dim)}
+.pill{display:inline-block;padding:.1rem .5rem;border-radius:99px;font-size:.78rem;font-weight:600;border:1px solid}
+.crit{color:var(--crit);border-color:var(--crit)}
+.warn{color:var(--warn);border-color:var(--warn)}
+.ok{color:var(--ok);border-color:var(--ok)}
+.info{color:var(--info);border-color:var(--info)}
+.dim{color:var(--dim)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}
+.bad{color:var(--crit);font-weight:600}
+a{color:var(--info)}
+form{display:inline}
+button{font:inherit;padding:.3rem .7rem;border-radius:6px;border:1px solid var(--line);
+background:var(--card);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--info)}
+</style>
+</head><body>
+<header><nav>
+<span class="brand">Kerberon</span>
+<a href="/ui/" {{if eq .Nav "now"}}class="on"{{end}}>Now</a>
+<a href="/ui/incidents" {{if eq .Nav "incidents"}}class="on"{{end}}>Incidents</a>
+<a href="/ui/schedules" {{if eq .Nav "schedules"}}class="on"{{end}}>Schedules</a>
+<a href="/ui/config" {{if eq .Nav "config"}}class="on"{{end}}>Config</a>
+<a href="/ui/settings" {{if eq .Nav "settings"}}class="on"{{end}}>Settings</a>
+</nav></header>
+<main>{{template "content" .}}</main>
+</body></html>{{end}}

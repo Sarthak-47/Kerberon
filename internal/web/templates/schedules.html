@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1>Schedules</h1>
+<p class="dim">Next 30 days. A gap is a period nobody is on call.</p>
+{{range .Schedules}}
+<h2>{{.Name}} <span class="dim">({{.Timezone}}, team {{.Team}})</span></h2>
+<div class="card">
+{{if .Spans}}<table>
+<tr><th>From</th><th>To</th><th>On call</th></tr>
+{{range .Spans}}<tr>
+  <td class="dim">{{.Start}}</td><td class="dim">{{.End}}</td>
+  <td>{{if .Gap}}<span class="bad">NOBODY ON CALL</span>{{else}}{{.User}}{{end}}</td>
+</tr>{{end}}
+</table>{{else}}<p class="empty">No coverage at all.</p>{{end}}
+</div>
+{{else}}<div class="card"><p class="empty">No schedules configured.</p></div>{{end}}
+{{end}}
