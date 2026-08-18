@@ -215,7 +215,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 7 — Hardening
+## Phase 7 — Hardening — **mostly complete**
 
 **Goal:** earn the numbers before publishing them.
 
@@ -227,7 +227,18 @@ concurrency test belongs with the load harness in Phase 7.
 - Cross-compilation for linux/amd64, linux/arm64, darwin/arm64, windows/amd64.
 - Docker image; install script (**pending name resolution, §15.1**).
 
-**Exit criteria — publish only what is measured**
+**Measured so far** (28-core dev machine, `cmd/kerberon-bench`):
+ingest **8,469 alerts/sec**, p99 request latency 924 ms for a 200-alert batch,
+20,000 alerts collapsing to 20 incidents, binary **7.2 MB**, zero missed or duplicate
+escalations across randomised kill/restart cycles.
+
+Still unmeasured, and therefore unpublished: end-to-end p99 notification latency, and
+idle RSS. Both need a run on representative hardware rather than a development laptop.
+
+Still outstanding in this phase: config hot reload on SIGHUP/fsnotify, and retention
+with nightly vacuum.
+
+**Original exit criteria — publish only what is measured**
 - Zero missed and zero duplicate escalations across 1,000 kill/restart cycles.
 - Measured ingest throughput on a 2-vCPU box (target ≥5,000/s; publish the real
   number).
@@ -237,7 +248,7 @@ concurrency test belongs with the load harness in Phase 7.
 
 ---
 
-## Phase 8 — Launch
+## Phase 8 — Launch — **in progress**
 
 **Goal:** be findable and be trusted.
 

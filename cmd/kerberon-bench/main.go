@@ -4,6 +4,12 @@
 // It exists so the numbers in the README are measured rather than asserted.
 // Publishing a throughput figure nobody has reproduced is how a project loses
 // the credibility it was trying to buy (spec section 11).
+//
+// This tool is exempt from the clock rule because measuring real elapsed wall
+// time is precisely what it does. A fake clock here would report whatever it
+// was told to, which is the opposite of the point.
+//
+//kerberon:allow-clock-file
 package main
 
 import (
