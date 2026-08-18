@@ -91,17 +91,38 @@ type Result struct {
 	Unrouted int
 }
 
+// txChunk bounds how many alerts share one transaction.
+//
+// The write pool holds a single connection, so a transaction holds the only
+// write path for its duration. Batching is what makes ingest fast, but an
+// unbounded batch would stall every other writer — the ack handler, the
+// scheduler — behind one enormous webhook.
+const txChunk = 250
+
 // Ingest stores alerts and attaches them to incidents.
 //
-// Each alert is handled in its own transaction. Batching them is a deliberate
-// later optimisation: the write path is already funnelled through the single
-// writer, so a batcher can be added without touching callers (DECISIONS D3).
+// Alerts are committed in chunks rather than one transaction each. Measured on
+// a 28-core machine, per-alert transactions gave 1,492 alerts/sec because the
+// cost was 20,000 commits rather than the work itself; batching removes that
+// floor. See DECISIONS.md D3, which deferred this until a benchmark showed it
+// was needed.
+//
+// A chunk is all-or-nothing. That is the right trade for a webhook: the sender
+// retries the whole payload, and a partially applied batch would leave an
+// incident whose alert count disagrees with the alerts actually stored.
 func (e *Engine) Ingest(ctx context.Context, alerts []core.Alert) (Result, error) {
 	var res Result
 
+	// Route first, outside any transaction: matching is pure computation and
+	// an unrouted alert should not occupy the write connection at all.
+	type routed struct {
+		alert core.Alert
+		route route.Route
+	}
+	pending := make([]routed, 0, len(alerts))
+
 	for i := range alerts {
 		a := alerts[i]
-
 		rt, ok := e.router.Match(a.Labels)
 		if !ok {
 			// An unrouted alert pages nobody, which is the exact failure this
@@ -112,18 +133,43 @@ func (e *Engine) Ingest(ctx context.Context, alerts []core.Alert) (Result, error
 				"labels", a.Labels, "source", a.Source)
 			continue
 		}
+		a.Fingerprint = rt.Fingerprint(a.Labels)
+		pending = append(pending, routed{alert: a, route: rt})
+	}
 
-		created, deduped, err := e.ingestOne(ctx, a, rt)
+	for start := 0; start < len(pending); start += txChunk {
+		end := start + txChunk
+		if end > len(pending) {
+			end = len(pending)
+		}
+		chunk := pending[start:end]
+
+		var chunkRes Result
+		err := e.db.Tx(ctx, func(tx *sql.Tx) error {
+			// Reset per attempt: a rolled-back transaction must not leave its
+			// counts behind.
+			chunkRes = Result{}
+			for _, p := range chunk {
+				created, deduped, err := e.applyAlert(ctx, tx, p.alert, p.route)
+				if err != nil {
+					return err
+				}
+				chunkRes.AlertsAccepted++
+				if created {
+					chunkRes.IncidentsCreated++
+				}
+				if deduped {
+					chunkRes.AlertsDeduplicated++
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return res, err
 		}
-		res.AlertsAccepted++
-		if created {
-			res.IncidentsCreated++
-		}
-		if deduped {
-			res.AlertsDeduplicated++
-		}
+		res.AlertsAccepted += chunkRes.AlertsAccepted
+		res.IncidentsCreated += chunkRes.IncidentsCreated
+		res.AlertsDeduplicated += chunkRes.AlertsDeduplicated
 	}
 
 	if res.AlertsAccepted > 0 {
@@ -133,36 +179,30 @@ func (e *Engine) Ingest(ctx context.Context, alerts []core.Alert) (Result, error
 	return res, nil
 }
 
-func (e *Engine) ingestOne(ctx context.Context, a core.Alert, rt route.Route) (created, deduped bool, err error) {
-	a.Fingerprint = rt.Fingerprint(a.Labels)
+// applyAlert stores one alert inside a caller's transaction.
+func (e *Engine) applyAlert(ctx context.Context, tx *sql.Tx, a core.Alert, rt route.Route) (created, deduped bool, err error) {
 	groupKey := rt.GroupKey(a.Labels)
 	now := e.clk.Now()
 
-	err = e.db.Tx(ctx, func(tx *sql.Tx) error {
-		created, deduped = false, false
-
-		inc, err := store.OpenIncidentByGroupKey(ctx, tx, groupKey)
-		switch {
-		case errors.Is(err, store.ErrNoOpenIncident):
-			// A resolved alert with no open incident has nothing to close.
-			// Store it for the record but do not open an incident, or a
-			// resolution would page someone about a problem already over.
-			if a.Status == core.AlertResolved {
-				_, err := store.InsertAlert(ctx, tx, a)
-				return err
-			}
-			created = true
-			return e.openIncident(ctx, tx, a, rt, groupKey, now)
-
-		case err != nil:
-			return err
-
-		default:
-			deduped, err = e.attachToIncident(ctx, tx, a, rt, inc, now)
-			return err
+	inc, err := store.OpenIncidentByGroupKey(ctx, tx, groupKey)
+	switch {
+	case errors.Is(err, store.ErrNoOpenIncident):
+		// A resolved alert with no open incident has nothing to close. Store
+		// it for the record but do not open an incident, or a resolution would
+		// page someone about a problem already over.
+		if a.Status == core.AlertResolved {
+			_, err := store.InsertAlert(ctx, tx, a)
+			return false, false, err
 		}
-	})
-	return created, deduped, err
+		return true, false, e.openIncident(ctx, tx, a, rt, groupKey, now)
+
+	case err != nil:
+		return false, false, err
+
+	default:
+		deduped, err := e.attachToIncident(ctx, tx, a, rt, inc, now)
+		return false, deduped, err
+	}
 }
 
 // openIncident creates an incident for a new group and starts its group_wait.

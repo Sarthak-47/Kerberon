@@ -159,6 +159,7 @@ func TestMigrateCreatesEverySchemaObject(t *testing.T) {
 		"idx_timers_pending", "idx_notifications_due",
 		"idx_notifications_sending", "idx_acks_incident",
 		"idx_overrides_window", "idx_heartbeats_state", "idx_events_incident",
+		"idx_alerts_incident_fingerprint",
 	}
 	for _, idx := range wantIndexes {
 		var n int

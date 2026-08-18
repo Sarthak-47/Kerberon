@@ -122,14 +122,17 @@ func (db *DB) AlertsForIncident(ctx context.Context, incidentID int64) ([]core.A
 // this fingerprint. It is how a repeat is distinguished from a genuinely new
 // alert joining the group, which is what makes the dedup count meaningful.
 func HasFingerprint(ctx context.Context, q Queryer, incidentID int64, fingerprint string) (bool, error) {
-	var n int
+	// EXISTS stops at the first match. COUNT(*) with a LIMIT does not: the
+	// limit applies to the aggregate's single output row, not to the scan, so
+	// it counted every matching alert while looking like a short-circuit.
+	var found int
 	err := q.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM alerts WHERE incident_id = ? AND fingerprint = ? LIMIT 1`,
-		incidentID, fingerprint).Scan(&n)
+		SELECT EXISTS(SELECT 1 FROM alerts WHERE incident_id = ? AND fingerprint = ?)`,
+		incidentID, fingerprint).Scan(&found)
 	if err != nil {
 		return false, fmt.Errorf("check fingerprint: %w", err)
 	}
-	return n > 0, nil
+	return found == 1, nil
 }
 
 // AllAlertsResolved reports whether every distinct fingerprint in an incident
